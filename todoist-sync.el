@@ -81,6 +81,7 @@
               (message "Got error: %S" data)))
     ))
 
+;; DEPRECATED: the updated items will usually just be the response of the add-item request
 (defun todoist-sync-get-items (callback)
   "Get all items from the Todoist API."
   (request
@@ -97,7 +98,7 @@
             (lambda (&key data &allow-other-keys)
               (message "Got error: %S" data)))))
 
-(defun todoist-sync-add-item (marker args)
+(defun todoist-sync-add-item (marker args agenda-uuid &optional sync-todo-state)
   "Add an item to a project."
 
   (request
@@ -114,16 +115,19 @@
     ;; TODO custom success / failure callbacks
     :success (cl-function
               (lambda (&key data &allow-other-keys)
-                                        ;: For now only getting data updates the token.
-                ;; If setting data updates the token then we will have to parse the response and update accordingly.
-                ;; (todoist-sync--update-sync-token (cdr (assoc 'sync_token data)))
+                (when sync-todo-state
+                  (message "Syncing todo state")
+                  (todoist-sync--update-sync-token (cdr (assoc 'sync_token data)))
+                  ;; NOTE: I'm not sure if there could be conflicts if the some heading is updated at the same time asynchronously (also not everything has an id yet ...)
+                  (todoist-sync--org-update-from-items
+                   (todoist-sync--filter-by-project
+                    (cdr (assoc 'items data))
+                    agenda-uuid)))
                 ;; TODO: [MULTIPLE] For now assume that only one item is added at a time.
                 (let* ((temp_id_mapping (car (cdr (assoc 'temp_id_mapping data))))
                        (id (cdr temp_id_mapping)))
                   (org-entry-put marker todoist-sync-org-prop-synced id)
-                  (message "Successfully added item %s" id))
-                (message "Response: %s" data)
-                ))
+                  (message "Successfully added item %s" id))))
     :error (cl-function
             (lambda (&key data &allow-other-keys)
               (message "Got error: %S" data)))))
@@ -200,17 +204,16 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
   "Converts <2023-10-09 Sun> to 2023-10-09"
   (replace-regexp-in-string "<\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\).*>" "\\1" org-time-str))
 
-(defun todoist-sync-push-agenda-todos ()
+(defun todoist-sync-push-agenda-todos (&optional sync-todo-state)
+  "Push all TODO entries from all agenda files to todoist."
   (todoist-sync--org-visit-todos
    (lambda ()
      (let* ((synced (org-entry-get (point) todoist-sync-org-prop-synced))
             (heading (org-get-heading t t t t))
-            ;; cleaned org text (without PROPERTIES drawer)
             (description (todoist-sync--clean-org-text (org-get-entry)))
-            ;; org-due-str might be nil
             (org-due-str (org-entry-get (point) "DEADLINE"))
             (todoist-due-string (when org-due-str (todoist-sync--org-to-todoist-date org-due-str)))
-            ;; Use this when directly assigning the time
+            ;; TODO: Use this when directly assigning the time
             ;; (due (when todoist-due-string `((date . ,todoist-due-string))))
             (due (when todoist-due-string `((string . ,todoist-due-string)))))
        (when (not synced)
@@ -221,16 +224,16 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
              (point-marker) `((content . ,heading)
                               (project_id . ,agenda-uuid)
                               (description . ,description)
-                              (due . ,due))))))))))
+                              (due . ,due))
+             agenda-uuid
+             sync-todo-state))))))))
 
 
-(defun todoist-sync--org-do-update (_id item)
+(defun todoist-sync--org-do-update (id item)
   "Called for each org heading where the todoist item has changed."
   ;; At the moment the cursor is placed at that position ... TODO: pass marker insead
   (let* ((org-is-done (org-entry-is-done-p))
-         (todoist-is-done (cdr (assoc 'completed_at item)))
-         (id (cdr (assoc 'id item)))
-         )
+         (todoist-is-done (cdr (assoc 'completed_at item))))
     (message "Handling item: %s\n" item)
     (message "Updating org entry %s with id %s. Org is done: %s, Todoist is done: %s" (org-get-heading t t t t) id org-is-done todoist-is-done)
     (if (and (not org-is-done) todoist-is-done)
@@ -256,25 +259,17 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
                 (if item (todoist-sync--org-do-update id item)))))
          (message "Nothing changed in todoist."))))))
 
-(defun todoist-sync-download-todo-state ()
+(defun todoist-sync-sync-todo-state ()
   "Download the todo state from todoist and update the org files."
+  (interactive)
   (todoist-sync-get-agenda-items 'todoist-sync--org-update-from-items))
 
-;; (todoist-sync-push-agenda-todos)
-(todoist-sync-download-todo-state)
 
-
-
-;; (setq todoist-sync--agenda-uuid-cache nil)
-;; Temp test code
-;; (todoist-sync-get-agenda-items (lambda (items)
-;; (message "%s" (json-encode items))))
-
-;; (todoist-sync--ensure-agenda-uuid
-;;  (lambda (agenda-uuid)
-;;    (todoist-sync-add-item "temp-id" `((content . "test")
-;;                                       (project_id . ,agenda-uuid))))
-;;  )
+;; TODO: this only syncs if at least one item is added
+(defun todoist-sync ()
+  "Sync the agenda with todoist."
+  (interactive)
+  (todoist-sync-push-agenda-todos t))
 
 (provide 'todoist-sync)
 ;;; todoist-sync.el ends here
