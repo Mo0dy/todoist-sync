@@ -50,10 +50,14 @@
       todoist-sync--sync-token
     "*"))
 
+;; TODO: remove this again
+(defvar todoist-sync--freeze-update t)
 (defun todoist-sync--update-sync-token (new-token)
   "Updates the sync token"
-  (setq todoist-sync--sync-token new-token)
-  (message "Updated sync token to %s" new-token))
+  (if todoist-sync--freeze-update (message "Freezing update")
+    (progn
+      (setq todoist-sync--sync-token new-token)
+      (message "Updated sync token to %s" new-token))))
 
 (defun todoist-sync--generate-uuid ()
   "Generate a random UUID."
@@ -96,16 +100,13 @@
 (defun todoist-sync-add-item (marker args)
   "Add an item to a project."
 
-  ;; (message "Adding item with request: %s" (json-encode `(((type . "item_add")
-  ;;                                                         (temp_id . ,temp_id)
-  ;;                                                         (uuid . ,(todoist-sync--generate-uuid))
-  ;;                                                         (args . ,args)))))
   (request
     todoist-sync--api-url
     :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
     :params `(("sync_token" . ,(todoist-sync--get-sync-token))
               ("resource_types" . "[\"items\"]")
               ("commands" . ,(json-encode `(((type . "item_add")
+                                             ;; TODO: [MULTIPLE] use temp ids here
                                              (temp_id . ,"TMP-ID")
                                              (uuid . ,(todoist-sync--generate-uuid))
                                              (args . ,args))))))
@@ -116,7 +117,7 @@
                                         ;: For now only getting data updates the token.
                 ;; If setting data updates the token then we will have to parse the response and update accordingly.
                 ;; (todoist-sync--update-sync-token (cdr (assoc 'sync_token data)))
-                ;; TODO: For now assumen that only one item is added at a time.
+                ;; TODO: [MULTIPLE] For now assume that only one item is added at a time.
                 (let* ((temp_id_mapping (car (cdr (assoc 'temp_id_mapping data))))
                        (id (cdr temp_id_mapping)))
                   (org-entry-put marker todoist-sync-org-prop-synced id)
@@ -153,6 +154,8 @@
      )))
 
 
+;; @DEPRECATED the update should be done by the update function and when
+;; sending items.
 (defun todoist-sync-get-agenda-items (callback)
   "Get all items from the agenda project."
   (todoist-sync--ensure-agenda-uuid
@@ -211,9 +214,7 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
             ;; (due (when todoist-due-string `((date . ,todoist-due-string))))
             (due (when todoist-due-string `((string . ,todoist-due-string)))))
        (when (not synced)
-         ;; TODO: only mark synced if request was successful
-         ;; (org-entry-put (point) todoist-sync-org-prop-synced "t")
-         ;; TODO: collect all items and send them in one request
+         ;; TODO: [MULTIPLE] collect all items and send them in one request
          (todoist-sync--ensure-agenda-uuid
           (lambda (agenda-uuid)
             (todoist-sync-add-item
@@ -222,31 +223,50 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
                               (description . ,description)
                               (due . ,due))))))))))
 
-;; (defun todoist-sync-download-todo-state ()
-;;   "Download the todo state from todoist and update the org files."
-;;   (todoist-sync-get-agenda-items
-;;    (lambda (items)
-;;      (dolist (item items)
-;;        (let* ((org-id (cdr (assoc 'id item)))
-;;               (org-state (cdr (assoc 'checked item))))
-;;          (message "Updating org-id %s to state %s" org-id org-state)
-;;          (org-entry-put org-id "TODOIST_SYNCED" "t")
-;;          (org-entry-put org-id "TODOIST_STATE" org-state
-;;                         )
+
+(defun todoist-sync--org-do-update (_id item)
+  "Called for each org heading where the todoist item has changed."
+  ;; At the moment the cursor is placed at that position ... TODO: pass marker insead
+  (let* ((org-is-done (org-entry-is-done-p))
+         (todoist-is-done (cdr (assoc 'completed_at item)))
+         (id (cdr (assoc 'id item)))
+         )
+    (message "Handling item: %s\n" item)
+    (message "Updating org entry %s with id %s. Org is done: %s, Todoist is done: %s" (org-get-heading t t t t) id org-is-done todoist-is-done)
+    (if (and (not org-is-done) todoist-is-done)
+        (org-todo 'done))
+    ;; BUG: can't be visited because the org-crawling function ignores tasks that are done
+    (if (and org-is-done (not todoist-is-done))
+        (message "%s (%s) is done in org but not in todoist." (org-get-heading t t t t) id))))
 
 
-;; (sleep-for 2)
+(defun todoist-sync--org-update-from-items (items)
+  "Update the org entry with the data from the Todoist API."
+  (todoist-sync--ensure-agenda-uuid
+   (lambda (agenda-uuid)
+     (let* ((agenda-items (todoist-sync--filter-by-project items agenda-uuid))
+            (agenda-items-by-id (mapcar (lambda (item) (cons (cdr (assoc 'id item)) item)) agenda-items)))
+       (message "Got agenda items: %s" agenda-items)
+       (message "Got agenda items by id: %s" agenda-items-by-id)
+       (if agenda-items
+           (todoist-sync--org-visit-todos
+            (lambda ()
+              (let* ((id (org-entry-get (point) todoist-sync-org-prop-synced))
+                     (item (cdr (assoc id agenda-items-by-id))))
+                (if item (todoist-sync--org-do-update id item)))))
+         (message "Nothing changed in todoist."))))))
 
-;; (todoist-sync-get-agenda-items (lambda (items)
-;;                                  (message "%s" (json-encode items))))
+(defun todoist-sync-download-todo-state ()
+  "Download the todo state from todoist and update the org files."
+  (todoist-sync-get-agenda-items 'todoist-sync--org-update-from-items))
 
+;; (todoist-sync-push-agenda-todos)
+(todoist-sync-download-todo-state)
 
-;; (PUSH (cons heading (buffer-file-name)) todo-list))))))
 
 
 ;; (setq todoist-sync--agenda-uuid-cache nil)
 ;; Temp test code
-(todoist-sync-push-agenda-todos)
 ;; (todoist-sync-get-agenda-items (lambda (items)
 ;; (message "%s" (json-encode items))))
 
