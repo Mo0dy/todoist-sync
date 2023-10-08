@@ -51,38 +51,42 @@
 (defun todoist-sync-get-projects (callback)
   "Get all projects from the Todoist API. Ignores sync token."
   (message "Getting projects")
-  (let ((response (request
-                    todoist-sync--api-url
-                    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-                    :params `(("sync_token" . "*")
-                              ("resource_types" . "[\"projects\"]"))
-                    :parser 'json-read
-                    :success (cl-function
-                              (lambda (&key data &allow-other-keys)
-                                (funcall callback (cdr (assoc 'projects data)))
-                                (todoist-sync--update-sync-token (cdr (assoc 'sync_token data)))))
-                    :error (cl-function
-                            (lambda (&key data &allow-other-keys)
-                              (message "Got error: %S" data)))
-                    ))
-        )))
+  (request
+    todoist-sync--api-url
+    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
+    :params `(("sync_token" . "*")
+              ("resource_types" . "[\"projects\"]"))
+    :parser 'json-read
+    :success (cl-function
+              (lambda (&key data &allow-other-keys)
+                (funcall callback (cdr (assoc 'projects data)))
+                (todoist-sync--update-sync-token (cdr (assoc 'sync_token data)))))
+    :error (cl-function
+            (lambda (&key data &allow-other-keys)
+              (message "Got error: %S" data)))
+    ))
+
 
 (defun todoist-sync-get-items (callback)
   "Get all items from the Todoist API."
-  (let ((response (request
-                    todoist-sync--api-url
-                    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-                    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
-                              ("resource_types" . "[\"items\"]"))
-                    :parser 'json-read
-                    :success (cl-function
-                              (lambda (&key data &allow-other-keys)
-                                (funcall callback (cdr (assoc 'items data)))))
-                    :error (cl-function
-                            (lambda (&key data &allow-other-keys)
-                              (message "Got error: %S" data)))
-                    ))
-        )))
+  (request
+    todoist-sync--api-url
+    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
+    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
+              ("resource_types" . "[\"items\"]"))
+    :parser 'json-read
+    :success (cl-function
+              (lambda (&key data &allow-other-keys)
+                (funcall callback (cdr (assoc 'items data)))))
+    :error (cl-function
+            (lambda (&key data &allow-other-keys)
+              (message "Got error: %S" data)))))
+
+(defun todoist-sync--generate-uuid ()
+  "Generate a UUID."
+  (sha1 (random) (current-time) (emacs-pid)))
+
+(defun todoist-sync-add-item (temp_id))
 
 (defun todoist-sync--extract-agenda-project-uuid (projects)
   "Extract the UUID of the agenda project from the list of projects."
@@ -102,10 +106,12 @@
 (defun todoist-sync--ensure-agenda-uuid (callback)
   (if todoist-sync--agenda-uuid-cache
       (funcall callback todoist-sync--agenda-uuid-cache)
-    (lambda (projects)
-      (let ((agenda-project-uuid (todoist-sync--extract-agenda-project-uuid projects)))
-        (setq todoist-sync--agenda-uuid-cache agenda-project-uuid)
-        (funcall callback agenda-project-uuid)))))
+    (todoist-sync-get-projects
+     (lambda (projects)
+       (let ((agenda-project-uuid (todoist-sync--extract-agenda-project-uuid projects)))
+         (setq todoist-sync--agenda-uuid-cache agenda-project-uuid)
+         (funcall callback agenda-project-uuid)))
+     )))
 
 
 (defun todoist-sync-get-agenda-items (callback)
@@ -118,6 +124,7 @@
      )))
 
 
+(setq todoist-sync--agenda-uuid-cache nil)
 ;; Temp test code
 (todoist-sync-get-agenda-items (lambda (items)
                                  (message "%s" (json-encode items))))
