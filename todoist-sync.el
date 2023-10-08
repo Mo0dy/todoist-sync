@@ -93,7 +93,7 @@
             (lambda (&key data &allow-other-keys)
               (message "Got error: %S" data)))))
 
-(defun todoist-sync-add-item (temp_id marker args)
+(defun todoist-sync-add-item (marker args)
   "Add an item to a project."
 
   ;; (message "Adding item with request: %s" (json-encode `(((type . "item_add")
@@ -106,7 +106,7 @@
     :params `(("sync_token" . ,(todoist-sync--get-sync-token))
               ("resource_types" . "[\"items\"]")
               ("commands" . ,(json-encode `(((type . "item_add")
-                                             (temp_id . ,temp_id)
+                                             (temp_id . ,"TMP-ID")
                                              (uuid . ,(todoist-sync--generate-uuid))
                                              (args . ,args))))))
     :parser 'json-read
@@ -201,7 +201,6 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
   (todoist-sync--org-visit-todos
    (lambda ()
      (let* ((synced (org-entry-get (point) todoist-sync-org-prop-synced))
-            (org_id (org-id-get-create))
             (heading (org-get-heading t t t t))
             ;; cleaned org text (without PROPERTIES drawer)
             (description (todoist-sync--clean-org-text (org-get-entry)))
@@ -218,10 +217,10 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
          (todoist-sync--ensure-agenda-uuid
           (lambda (agenda-uuid)
             (todoist-sync-add-item
-             org_id (point-marker) `((content . ,heading)
-                                     (project_id . ,agenda-uuid)
-                                     (description . ,description)
-                                     (due . ,due))))))))))
+             (point-marker) `((content . ,heading)
+                              (project_id . ,agenda-uuid)
+                              (description . ,description)
+                              (due . ,due))))))))))
 
 ;; (defun todoist-sync-download-todo-state ()
 ;;   "Download the todo state from todoist and update the org files."
