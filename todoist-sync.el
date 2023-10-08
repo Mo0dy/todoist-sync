@@ -99,21 +99,26 @@
    items))
 
 
+(defun todoist-sync--ensure-agenda-uuid (callback)
+  (if todoist-sync--agenda-uuid-cache
+      (funcall callback todoist-sync--agenda-uuid-cache)
+    (lambda (projects)
+      (let ((agenda-project-uuid (todoist-sync--extract-agenda-project-uuid projects)))
+        (setq todoist-sync--agenda-uuid-cache agenda-project-uuid)
+        (funcall callback agenda-project-uuid)))))
+
+
 (defun todoist-sync-get-agenda-items (callback)
   "Get all items from the agenda project."
-  (if todoist-sync--agenda-uuid-cache
-      (todoist-sync-get-items
-       (lambda (items)
-         (funcall callback (todoist-sync--filter-by-project items todoist-sync--agenda-uuid-cache))))
-    (todoist-sync-get-projects
-     (lambda (projects)
-       (let ((agenda-project-uuid (todoist-sync--extract-agenda-project-uuid projects)))
-         (setq todoist-sync--agenda-uuid-cache agenda-project-uuid)
-         (todoist-sync-get-agenda-items callback))))))
+  (todoist-sync--ensure-agenda-uuid
+   (lambda (agenda-uuid)
+     (todoist-sync-get-items
+      (lambda (items)
+        (funcall callback (todoist-sync--filter-by-project items agenda-uuid))))
+     )))
 
 
 ;; Temp test code
-(setq todoist-sync-token "...")
 (todoist-sync-get-agenda-items (lambda (items)
                                  (message "%s" (json-encode items))))
 
