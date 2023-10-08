@@ -35,7 +35,10 @@
   "The name of the project to sync with the agenda.")
 (defvar todoist-sync-org-prop-synced "TODOIST_SYNCED")
 
-(defvar todoist-sync-incremental-sync nil "Whether to use incremental sync or not.")
+;; BUG: This must be t for the package to work
+;; TODO: when incremental sync is disabled the response contains all items that are not done
+;; Any item that is not in the response should be assumed to be done
+(defvar todoist-sync-incremental-sync t "Whether to use incremental sync or not.")
 (defvar todoist-sync--sync-token "nil" "The sync token for the Todoist API.")
 ;; todo load from file
 
@@ -51,13 +54,9 @@
     "*"))
 
 ;; TODO: remove this again
-(defvar todoist-sync--freeze-update t)
 (defun todoist-sync--update-sync-token (new-token)
   "Updates the sync token"
-  (if todoist-sync--freeze-update (message "Freezing update")
-    (progn
-      (setq todoist-sync--sync-token new-token)
-      (message "Updated sync token to %s" new-token))))
+  (setq todoist-sync--sync-token new-token))
 
 (defun todoist-sync--generate-uuid ()
   "Generate a random UUID."
@@ -234,8 +233,6 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
   ;; At the moment the cursor is placed at that position ... TODO: pass marker insead
   (let* ((org-is-done (org-entry-is-done-p))
          (todoist-is-done (cdr (assoc 'completed_at item))))
-    (message "Handling item: %s\n" item)
-    (message "Updating org entry %s with id %s. Org is done: %s, Todoist is done: %s" (org-get-heading t t t t) id org-is-done todoist-is-done)
     (if (and (not org-is-done) todoist-is-done)
         (org-todo 'done))
     ;; BUG: can't be visited because the org-crawling function ignores tasks that are done
@@ -245,12 +242,11 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
 
 (defun todoist-sync--org-update-from-items (items)
   "Update the org entry with the data from the Todoist API."
+  (message "Updating org from todoist:\n%s" items)
   (todoist-sync--ensure-agenda-uuid
    (lambda (agenda-uuid)
      (let* ((agenda-items (todoist-sync--filter-by-project items agenda-uuid))
             (agenda-items-by-id (mapcar (lambda (item) (cons (cdr (assoc 'id item)) item)) agenda-items)))
-       (message "Got agenda items: %s" agenda-items)
-       (message "Got agenda items by id: %s" agenda-items-by-id)
        (if agenda-items
            (todoist-sync--org-visit-todos
             (lambda ()
@@ -269,7 +265,8 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
 (defun todoist-sync ()
   "Sync the agenda with todoist."
   (interactive)
-  (todoist-sync-push-agenda-todos t))
+  (todoist-sync-push-agenda-todos t)
+  (todoist-sync-sync-todo-state))
 
 (provide 'todoist-sync)
 ;;; todoist-sync.el ends here
