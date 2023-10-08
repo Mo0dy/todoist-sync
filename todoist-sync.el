@@ -20,6 +20,10 @@
 ;;; Code:
 
 
+;; TODO: support for recurring tasks
+
+
+
 (require 'json)
 (require 'request)
 (require 'org)
@@ -108,8 +112,8 @@
                                         ;: For now only getting data updates the token.
                 ;; If setting data updates the token then we will have to parse the response and update accordingly.
                 ;; (todoist-sync--update-sync-token (cdr (assoc 'sync_token data)))
-                ;; (message "Got data: %s" data)
                 (message "Successfully added item %s" temp_id)
+                ;; (message "Response: %s" data)
                 ))
     :error (cl-function
             (lambda (&key data &allow-other-keys)
@@ -170,27 +174,73 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
           (goto-char marker)
           (funcall callback))))))
 
+;; "items": [
+;;     {
+;;       "sync_id": null,
+;;       "project_id": "2203306141",
+;;       "labels": [],
+;;       "is_deleted": false,
+;;       "child_order": 1,
+;;       "checked": false,
+;;       "priority": 1,
+;;       "id": "2995104339",
+;;       "added_by_uid": "1",
+;;       "assigned_by_uid": "1",
+;;       "day_order": -1,
+;;       "collapsed": false,
+;;       "due": {
+;;         "date": "2016-08-05T07:00:00.000000Z",
+;;         "timezone": null,
+;;         "is_recurring": false,
+;;         "string": "tomorrow at 10:00",
+;;         "lang": "en"
+;;       },
+;;       "responsible_uid": null,
+;;       "content": "Buy Coffee",
+;;       "description": "",
+;;       "user_id": "1",
+;;       "parent_id": null,
+;;       "added_at": "2016-08-01T13:19:45.000000Z"
+;;     }
+
+
+;; TODO: do this properly
+(defun todoist-sync--clean-org-text (text)
+  "Remove the PROPERTIES drawer from the org text."
+  (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:\n" "" text))
+
 
 (defun todoist-sync-push-agenda-todos ()
   (todoist-sync--org-visit-todos
    (lambda ()
      (let ((synced (org-entry-get (point) todoist-sync-org-prop-synced))
            (org_id (org-id-get-create))
-           (heading (org-get-heading t t t t)))
+           (heading (org-get-heading t t t t))
+           ;; cleaned org text (without PROPERTIES drawer)
+           (description (todoist-sync--clean-org-text (org-get-entry)))
+           (due (org-get-deadline-time t)))
        (when (not synced)
          ;; TODO: only mark synced if request was successful
          (org-entry-put (point) todoist-sync-org-prop-synced "t")
          ;; TODO: collect all items and send them in one request
-         (todoist-sync-add-item org_id `((content . ,heading)
-                                         (project_id . ,(todoist-sync--ensure-agenda-uuid
-                                                         (lambda (agenda-uuid)
-                                                           agenda-uuid))))))
+         (todoist-sync--ensure-agenda-uuid
+          (lambda (agenda-uuid)
+            (message "Adding with due date: %s" due)
+            (todoist-sync-add-item org_id `((content . ,heading)
+                                            (project_id . ,agenda-uuid)
+                                            (description . ,description)
+                                            (due . ,due)
+                                            )))
+          )
+         )
        ))))
 
-;; (todoist-sync-push-agenda-todos)
+(todoist-sync-push-agenda-todos)
 
-;; (todoist-sync-get-agenda-items (lambda (items)
-;;                                  (message "%s" (json-encode items))))
+(sleep-for 1)
+
+(todoist-sync-get-agenda-items (lambda (items)
+                                 (message "%s" (json-encode items))))
 
 
 ;; (PUSH (cons heading (buffer-file-name)) todo-list))))))
