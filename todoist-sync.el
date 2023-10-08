@@ -96,6 +96,10 @@
 (defun todoist-sync-add-item (temp_id args)
   "Add an item to a project."
 
+  (message "Adding item with request: %s" (json-encode `(((type . "item_add")
+                                                          (temp_id . ,temp_id)
+                                                          (uuid . ,(todoist-sync--generate-uuid))
+                                                          (args . ,args)))))
   (request
     todoist-sync--api-url
     :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
@@ -209,16 +213,29 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
   "Remove the PROPERTIES drawer from the org text."
   (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:\n" "" text))
 
+;; TODOIST somehow assumes that the task should be at two
+;; (defun todoist-sync--org-to-todoist-date (org-time-str)
+;;   "Convert an org date string to a todoist date string."
+;;   (format-time-string "%Y-%m-%dT%H:%M:%S.000000Z" (org-time-string-to-time org-time-str)))
+
+(defun todoist-sync--org-to-todoist-date (org-time-str)
+  "Converts <2023-10-09 Sun> to 2023-10-09"
+  (replace-regexp-in-string "<\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\).*>" "\\1" org-time-str))
 
 (defun todoist-sync-push-agenda-todos ()
   (todoist-sync--org-visit-todos
    (lambda ()
-     (let ((synced (org-entry-get (point) todoist-sync-org-prop-synced))
-           (org_id (org-id-get-create))
-           (heading (org-get-heading t t t t))
-           ;; cleaned org text (without PROPERTIES drawer)
-           (description (todoist-sync--clean-org-text (org-get-entry)))
-           (due (org-get-deadline-time t)))
+     (let* ((synced (org-entry-get (point) todoist-sync-org-prop-synced))
+            (org_id (org-id-get-create))
+            (heading (org-get-heading t t t t))
+            ;; cleaned org text (without PROPERTIES drawer)
+            (description (todoist-sync--clean-org-text (org-get-entry)))
+            ;; org-due-str might be nil
+            (org-due-str (org-entry-get (point) "DEADLINE"))
+            (todoist-due-string (when org-due-str (todoist-sync--org-to-todoist-date org-due-str)))
+            ;; Use this when directly assigning the time
+            ;; (due (when todoist-due-string `((date . ,todoist-due-string))))
+            (due (when todoist-due-string `((string . ,todoist-due-string)))))
        (when (not synced)
          ;; TODO: only mark synced if request was successful
          (org-entry-put (point) todoist-sync-org-prop-synced "t")
@@ -229,18 +246,14 @@ Each element in the list is a cons cell (HEADING . FILENAME)."
             (todoist-sync-add-item org_id `((content . ,heading)
                                             (project_id . ,agenda-uuid)
                                             (description . ,description)
-                                            (due . ,due)
-                                            )))
-          )
-         )
-       ))))
+                                            (due . ,due))))))))))
 
-(todoist-sync-push-agenda-todos)
+;; (todoist-sync-push-agenda-todos)
 
-(sleep-for 1)
+;; (sleep-for 2)
 
-(todoist-sync-get-agenda-items (lambda (items)
-                                 (message "%s" (json-encode items))))
+;; (todoist-sync-get-agenda-items (lambda (items)
+;;                                  (message "%s" (json-encode items))))
 
 
 ;; (PUSH (cons heading (buffer-file-name)) todo-list))))))
