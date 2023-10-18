@@ -201,7 +201,8 @@
         (heading (org-get-heading t t t t))
         (description (todoist-sync--clean-org-text (org-get-entry)))
         (due (todoist-sync--todoist-date-for-at-point))
-        (org-is-done (org-entry-is-done-p)))
+        (org-is-done (org-entry-is-done-p))
+        (mark-pos (point-marker)))
     (when synced-id
       ;; If the item is already synced we need to check if it has changed
       (let* ((todoist-item (cdr (assoc synced-id changed-agenda-items-by-id)))
@@ -212,7 +213,7 @@
         (when todoist-is-done
           (org-todo 'done)
           ;; TODO: handle cancled etc better
-          (org-entry-delete (point-marker) todoist-sync-org-prop-synced))))
+          (org-entry-delete mark-pos todoist-sync-org-prop-synced))))
     (when (and (not synced-id) (not org-is-done))
       ;; TODO: [MULTIPLE] collect all items and send them in one request
       (todoist-sync-add-item
@@ -224,7 +225,7 @@
          ;; Add the id of the new item to the org entry
          (let* ((temp_id_mapping (car (cdr (assoc 'temp_id_mapping data))))
                 (id (cdr temp_id_mapping)))
-           (org-entry-put (point-marker) todoist-sync-org-prop-synced id)
+           (org-entry-put mark-pos todoist-sync-org-prop-synced id)
            (message "Successfully added item %s" id)))))))
 
 (defun todoist-sync--do-sync ()
