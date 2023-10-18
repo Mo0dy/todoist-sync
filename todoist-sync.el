@@ -36,12 +36,9 @@
   "The name of the project to sync with the agenda.")
 (defvar todoist-sync-org-prop-synced "TODOIST_SYNCED")
 
-;; BUG: This must be t for the package to work
-;; TODO: when incremental sync is disabled the response contains all items that are not done
-;; Any item that is not in the response should be assumed to be done
+;; TODO: test without incremental sync
 (defvar todoist-sync-incremental-sync t "Whether to use incremental sync or not.")
 (defvar todoist-sync--sync-token "nil" "The sync token for the Todoist API.")
-;; todo load from file
 
 (defvar todoist-sync--api-url "https://api.todoist.com/sync/v9/sync")
 
