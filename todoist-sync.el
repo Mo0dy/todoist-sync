@@ -119,6 +119,46 @@
             (lambda (&key data &allow-other-keys)
               (message "Got error: %S" data)))))
 
+;; NOTE: untested
+(defun todoist-sync--update-item (args callback)
+  (request
+    todoist-sync--api-url
+    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
+    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
+              ("resource_types" . "[\"items\"]")
+              ("commands" . ,(json-encode `(((type . "item_update")
+                                             (uuid . ,(todoist-sync--generate-uuid))
+                                             (args . ,args))))))
+    :parser 'json-read
+    :success (cl-function
+              (lambda (&key data &allow-other-keys)
+                (funcall callback data)))
+    :error (cl-function
+            (lambda (&key data &allow-other-keys)
+              (message "Got error: %S" data)))))
+
+(defun todoist-sync--complete-item (id callback)
+  (message "sending request %s" (json-encode `(((type . "item_complete")
+                                                (uuid . ,(todoist-sync--generate-uuid))
+                                                (args . ((ids . (,id))))))
+                                             ))
+  (request
+    todoist-sync--api-url
+    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
+    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
+              ("resource_types" . "[\"items\"]")
+              ("commands" . ,(json-encode `(((type . "item_complete")
+                                             (uuid . ,(todoist-sync--generate-uuid))
+                                             (args . ((id . ,id)))))
+                                          )))
+    :parser 'json-read
+    :success (cl-function
+              (lambda (&key data &allow-other-keys)
+                (funcall callback data)))
+    :error (cl-function
+            (lambda (&key data &allow-other-keys)
+              (message "Got error: %S" data)))))
+
 ;; ====== Org mode integration ======
 
 (defun todoist-sync--org-visit-todos (callback)
@@ -208,8 +248,10 @@
       (let* ((todoist-item (cdr (assoc synced-id changed-agenda-items-by-id)))
              (todoist-is-done (cdr (assoc 'completed_at todoist-item))))
         (when org-is-done
-          ;; TODO: push change to todoist
-          (message "org is done but this has not been pushed to todoist."))
+          (todoist-sync--complete-item
+           synced-id
+           (lambda (_)
+             (org-entry-delete mark-pos todoist-sync-org-prop-synced))))
         (when todoist-is-done
           (org-todo 'done)
           ;; TODO: handle cancled etc better
