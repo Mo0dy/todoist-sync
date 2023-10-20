@@ -278,7 +278,9 @@
 ;; TODO: remove DEADLINE from description
 (defun todoist-sync--clean-org-text (text)
   "Remove the PROPERTIES drawer from the org text."
-  (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:\n" "" text))
+  (let* ((text (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:\n" "" text))
+         (text (replace-regexp-in-string "DEADLINE:.*" "" text)))
+    text))
 
 ;; TODOIST somehow assumes that the task should be at two
 ;; (defun todoist-sync--org-to-todoist-date (org-time-str)
