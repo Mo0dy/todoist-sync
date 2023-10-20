@@ -232,8 +232,11 @@
         (sub-todos (cdr (assoc 'todos todo))))
     (insert (make-string level ?*) " TODO " (alist-get 'content data) "\n")
     (org-entry-put (point) todoist-sync-org-prop-synced (alist-get 'id data))
+    (when (alist-get 'due data)
+      (org-deadline nil (alist-get 'date (alist-get 'due data))))
+    (when (alist-get 'description data)
+      (insert (alist-get 'description data) "\n"))
     (dolist (child-todo sub-todos)
-      ;; add sync property
       (todoist-sync--write-todo-to-org child-todo (+ 1 level)))))
 
 (defun todoist-sync--write-project-to-org (project)
