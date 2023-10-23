@@ -196,6 +196,15 @@
           (goto-char marker)
           (funcall callback))))))
 
+(defun todoist-sync--get-first-synced-parent ()
+  "Get the first parent heading of the heading at point that has a todoist id."
+  (save-excursion
+    (when (org-up-heading-safe)
+      (let ((parent-synced-id (org-entry-get (point) todoist-sync-org-prop-synced)))
+        (if parent-synced-id
+            parent-synced-id
+          (todoist-sync--get-first-synced-parent))))))
+
 ;; ================== Write todoist items to org file ==================
 (defun todoist-sync--insert-todoist-file-explanation ()
   "Inserts a comment explaining the file format."
@@ -351,6 +360,9 @@
 
 (defun todoist-sync--visit-org-heading (changed-agenda-items-by-id)
   (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-synced))
+        ;; BUG: If the parent is currently being pushed there is no ID yet
+        ;; Solve: use uuids and collect all changes then do one request
+        (synced-id-parent (todoist-sync--get-first-synced-parent))
         (heading (org-get-heading t t t t))
         (description (todoist-sync--clean-org-text (org-get-entry)))
         (due (todoist-sync--todoist-date-for-at-point))
@@ -376,7 +388,8 @@
        `((content . ,heading)
          (project_id . ,todoist-sync--agenda-uuid)
          (description . ,description)
-         (due . ,due))
+         (due . ,due)
+         (parent_id . ,synced-id-parent))
        (lambda (data)
          ;; Add the id of the new item to the org entry
          (let* ((temp_id_mapping (car (cdr (assoc 'temp_id_mapping data))))
@@ -404,7 +417,8 @@
 (defun todoist-sync-push-heading ()
   "Push the changes in the current heading to todoist."
   (interactive)
-  ;; move pointer to title of the org section and call todoist-sync--visit-org-heading
+  ;; TODO: provide a recursive variant of this function that pushes parent headings as well
+  ;; TODO: provide a push region function
   (save-excursion
     (org-back-to-heading)
     (todoist-sync--visit-org-heading nil)))
