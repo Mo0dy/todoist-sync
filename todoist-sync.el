@@ -203,6 +203,9 @@
 (defun todoist-sync--build-todo-tree (parent-id items)
   "Recursively build the todo tree starting from PARENT-ID."
   ;; TODO make more efficient
+  (setq items (sort items (lambda (a b)
+                            (> (alist-get 'child_order a)
+                               (alist-get 'child_order b)))))
   (let (todos)
     (dotimes (i (length items))
       (let ((item (elt items i)))
@@ -214,6 +217,10 @@
     (nreverse todos)))
 
 (defun todoist-sync--hierarchicalize-projects (projects items)
+  ;; sort projects by child_order property
+  (setq projects (sort projects (lambda (a b)
+                                  (> (alist-get 'child_order a)
+                                     (alist-get 'child_order b)))))
   (let (result)
     (dotimes (i (length projects))
       (let* ((project (elt projects i))
