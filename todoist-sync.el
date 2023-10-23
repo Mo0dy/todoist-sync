@@ -47,6 +47,8 @@
 ;; This gets cached before the first sync
 (defvar todoist-sync--agenda-uuid nil "The UUID of the agenda project.")
 
+(defvar todoist-sync-fold-open-descriptions nil "Whether to fold open descriptions in the org file. Requires emacs version > 29.1")
+
 (defun todoist-sync--get-sync-token ()
   "Get the sync token for the Todoist API. May return '*'
    to indicate a full sync is configured."
@@ -258,7 +260,8 @@
   (dolist (project hierarchical-data)
     (todoist-sync--write-project-to-org project)))
 
-(defun todoist-sync--insert-todos-into-file ()
+(defun todoist-sync--insert-todos-into-file (&optional done-callback)
+  "Inserts todos into file."
                                         ;: TODO: using a separate sync token tracking keep an internal representation
   ;; and modify it as we go along
   (todoist-sync-get-projects
@@ -267,8 +270,11 @@
      (let ((todoist-sync--sync-token "*"))
        (todoist-sync-get-items
         (lambda (items)
+          (setq titems items)
+          (setq tproject projects)
           (let ((hierarchical-data (todoist-sync--hierarchicalize-projects projects items)))
-            (todoist-sync--write-hierarchical-data-to-org-file hierarchical-data))))))))
+            (todoist-sync--write-hierarchical-data-to-org-file hierarchical-data))
+          (funcall done-callback)))))))
 
 (defun todoist-sync-write-to-file ()
   "Writes todoist-information to org file."
@@ -279,8 +285,12 @@
   (erase-buffer)
   (insert "#+TITLE: Todoist\n")
   (todoist-sync--insert-todoist-file-explanation)
-  (todoist-sync--insert-todos-into-file)
-  (save-buffer))
+  (todoist-sync--insert-todos-into-file
+   (lambda ()
+     ;; if emacs version is > 29.1
+     (when (and (not todoist-sync-fold-open-descriptions) (fboundp 'org-cycle-content))
+       (org-cycle-content -1))
+     (save-buffer))))
 
 ;; ================== Sync Agenda Files ==================
 
@@ -321,7 +331,7 @@
 ;; Used in all entry points to the package.
 (defun todoist-sync--ensure-agenda-uuid (callback)
   "Makes sure that the agenda project UUID is cached.
-   Then calls the callback with the UUID as argument."
+  Then calls the callback with the UUID as argument."
   (if todoist-sync--agenda-uuid
       (funcall callback)
     (todoist-sync-get-projects
@@ -333,7 +343,7 @@
 ;; Gets all updated items from the agenda project
 (defun todoist-sync--get-agenda-udpates (callback)
   "Get all items from the agenda project.
-   Calls the callback with the changed items as argument."
+  Calls the callback with the changed items as argument."
   (todoist-sync-get-items
    (lambda (items)
      (funcall callback (todoist-sync--filter-by-project todoist-sync--agenda-uuid items)))
