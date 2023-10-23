@@ -401,6 +401,14 @@
    (lambda ()
      (todoist-sync--visit-org-heading nil))))
 
+(defun todoist-sync-push-heading ()
+  "Push the changes in the current heading to todoist."
+  (interactive)
+  ;; move pointer to title of the org section and call todoist-sync--visit-org-heading
+  (save-excursion
+    (org-back-to-heading)
+    (todoist-sync--visit-org-heading nil)))
+
 ;; The only public function in the package
 (defun todoist-sync ()
   "Sync the agenda with todoist."
