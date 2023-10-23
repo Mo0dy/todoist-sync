@@ -92,7 +92,6 @@ to indicate a full sync is configured."
    :sync-token "*"
    :resource-types '(projects)
    :callback (lambda (data)
-               (message "Got projects: %s" data)
                (funcall callback (cdr (assoc 'projects data))))))
 
 (defun todoist-sync-get-items (callback &optional update-sync-token)
@@ -440,7 +439,6 @@ to indicate a full sync is configured."
         (buffer-file-name)
         (lambda ()
           (todoist-sync--visit-org-heading nil command-stack)))
-       (message "Commands: %s" command-stack)
        (todoist-sync--request-commands command-stack)))))
 
 (defun todoist-sync-push-heading ()
