@@ -430,41 +430,44 @@ to indicate a full sync is configured."
            :commands (list command)
            :callback callback))))))
 
-(defun todoist-sync--do-sync ()
-  "Sync the agenda with todoist."
-  (todoist-sync--get-agenda-udpates
-   (lambda (items)
-     (let ((agenda-items-by-id (mapcar (lambda (item) (cons (cdr (assoc 'id item)) item)) items)))
-       (todoist-sync--org-visit-todos
-        (lambda ()
-          ;; TODO: use multiple-data
-          (todoist-sync--visit-org-heading agenda-items-by-id)))))))
-
 (defun todoist-sync-push-buffer ()
   "Push the changes in the current buffer to todoist."
   (interactive)
-  (let ((command-stack (todoist-sync--get-empty-command-stack)))
-    (todoist-sync--org-visit-todos-in-file
-     (buffer-file-name)
-     (lambda ()
-       (todoist-sync--visit-org-heading nil command-stack)))
-    (message "Commands: %s" command-stack)
-    (todoist-sync--request-commands command-stack)))
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (let ((command-stack (todoist-sync--get-empty-command-stack)))
+       (todoist-sync--org-visit-todos-in-file
+        (buffer-file-name)
+        (lambda ()
+          (todoist-sync--visit-org-heading nil command-stack)))
+       (message "Commands: %s" command-stack)
+       (todoist-sync--request-commands command-stack)))))
 
 (defun todoist-sync-push-heading ()
   "Push the changes in the current heading to todoist."
   (interactive)
   ;; TODO: provide a recursive variant of this function that pushes parent headings as well
   ;; TODO: provide a push region function
-  (save-excursion
-    (org-back-to-heading)
-    (todoist-sync--visit-org-heading nil)))
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (save-excursion
+       (org-back-to-heading)
+       (todoist-sync--visit-org-heading nil)))))
 
 ;; The only public function in the package
 (defun todoist-sync ()
   "Sync the agenda with todoist."
   (interactive)
-  (todoist-sync--ensure-agenda-uuid #'todoist-sync--do-sync))
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (todoist-sync--get-agenda-udpates
+      (lambda (items)
+        (let ((agenda-items-by-id (mapcar (lambda (item) (cons (cdr (assoc 'id item)) item)) items))
+              (command-stack (todoist-sync--get-empty-command-stack)))
+          (todoist-sync--org-visit-todos
+           (lambda ()
+             (todoist-sync--visit-org-heading agenda-items-by-id command-stack)))
+          (todoist-sync--request-commands command-stack)))))))
 
 (provide 'todoist-sync)
 ;;; todoist-sync.el ends here
