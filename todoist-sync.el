@@ -47,17 +47,17 @@
 ;; This gets cached before the first sync
 (defvar todoist-sync--agenda-uuid nil "The UUID of the agenda project.")
 
-(defvar todoist-sync-fold-open-descriptions nil "Whether to fold open descriptions in the org file. Requires emacs version > 29.1")
+(defvar todoist-sync-fold-open-descriptions nil "Whether to fold open descriptions in the org file. Requires Emacs version > 29.1.")
 
 (defun todoist-sync--get-sync-token ()
-  "Get the sync token for the Todoist API. May return '*'
-   to indicate a full sync is configured."
+  "Get the sync token for the Todoist API. May return '*'.
+to indicate a full sync is configured."
   (if todoist-sync-incremental-sync
       todoist-sync--sync-token
     "*"))
 
 (defun todoist-sync--update-sync-token (response)
-  "Updates the sync token from a todoist response"
+  "Updates the sync token from a todoist response."
   (setq todoist-sync--sync-token (cdr (assoc 'sync_token response))))
 
 ;; ================== API ==================
@@ -110,67 +110,79 @@
                       (equal (alist-get 'project_id item) project-id))
                     items))
 
-(defun todoist-sync-add-item (args callback)
-  (request
-    todoist-sync--api-url
-    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
-              ("resource_types" . "[\"items\"]")
-              ("commands" . ,(json-encode `(((type . "item_add")
-                                             ;; TODO: [MULTIPLE] use temp ids here
-                                             (temp_id . ,"TMP-ID")
-                                             (uuid . ,(todoist-sync--generate-uuid))
-                                             (args . ,args))))))
-    :parser 'json-read
-    :success (cl-function
-              (lambda (&key data &allow-other-keys)
-                (funcall callback data)))
-    :error (cl-function
-            (lambda (&key data &allow-other-keys)
-              (message "Got error: %S" data)))))
+;; Data pushing functions. (don't set any resource_type otherwise the request will return changes as well)
+;; In general commands are concatenated in a command stack and then executed
+;; The command stack also holds callbacks
 
-;; NOTE: untested
+(defun todoist-sync--get-empty-command-stack ()
+  (list (cons 'commands nil)
+        (cons 'callbacks nil)))
+
+(defun todoist-sync--add-command (command callback command-stack)
+  (setf (cdr (assoc 'commands command-stack))
+        (cons command (cdr (assoc 'commands command-stack))))
+  (setf (cdr (assoc 'callbacks command-stack))
+        (cons callback (cdr (assoc 'callbacks command-stack)))))
+
+(defun todoist-sync--add-item-command (temp_id args)
+  `((type . "item_add")
+    (temp_id . ,temp_id)
+    (uuid . ,(todoist-sync--generate-uuid))
+    (args . ,args)))
+
+(defun todoist-sync--item-update-command (args)
+  "ARGS must include id field"
+  `((type . "item_update")
+    (uuid . ,(todoist-sync--generate-uuid))
+    (args . ,args)))
+
+(defun todoist-sync--item-complete-command (id)
+  `((type . "item_complete")
+    (uuid . ,(todoist-sync--generate-uuid))
+    (args . ((id . ,id)))))
+
+(defun todoist-sync-add-item (args callback)
+  (todoist-sync--make-request
+   :commands (list (todoist-sync--add-item-command "TMP" args))
+   :callback callback))
+
 (defun todoist-sync--update-item (args callback)
-  (request
-    todoist-sync--api-url
-    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
-              ("resource_types" . "[\"items\"]")
-              ("commands" . ,(json-encode `(((type . "item_update")
-                                             (uuid . ,(todoist-sync--generate-uuid))
-                                             (args . ,args))))))
-    :parser 'json-read
-    :success (cl-function
-              (lambda (&key data &allow-other-keys)
-                (funcall callback data)))
-    :error (cl-function
-            (lambda (&key data &allow-other-keys)
-              (message "Got error: %S" data)))))
+  (todoist-sync--make-request
+   :commands (list (todoist-sync--item-update-command args))
+   :callback callback))
 
 (defun todoist-sync--complete-item (id callback)
-  (request
-    todoist-sync--api-url
-    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
-              ("resource_types" . "[\"items\"]")
-              ("commands" . ,(json-encode `(((type . "item_complete")
-                                             (uuid . ,(todoist-sync--generate-uuid))
-                                             (args . ((id . ,id)))))
-                                          )))
-    :parser 'json-read
-    :success (cl-function
-              (lambda (&key data &allow-other-keys)
-                (funcall callback data)))
-    :error (cl-function
-            (lambda (&key data &allow-other-keys)
-              (message "Got error: %S" data)))))
+  (todoist-sync--make-request
+   :commands (list (todoist-sync--item-complete-command id))
+   :callback callback))
+
+;; ====== Multiple API ==============
+
+(defun todoist-sync--multiple-add-command (command callback data)
+  (setf (cdr (assoc 'commands data))
+        (cons command (cdr (assoc 'commands data))))
+  (setf (cdr (assoc 'callbacks data))
+        (cons callback (cdr (assoc 'callbacks data)))))
+
+(defun todoist-sync--request-commands (command-stack)
+  (let ((commands (cdr (assoc 'commands command-stack)))
+        (callbacks (cdr (assoc 'callbacks command-stack))))
+    ;; fifo
+    (setq commands (reverse commands))
+    (setq callbacks (reverse callbacks))
+    (todoist-sync--make-request
+     :commands commands
+     :callback (lambda (data)
+                 (todoist-sync--update-sync-token data)
+                 (dolist (callback callbacks)
+                   (funcall callback data))))))
 
 ;; ====== Org mode integration ======
 
 ;; TODO: combine these functions
 (defun todoist-sync--org-visit-todos (callback)
   "Visit all TODO, etc. entries from all agenda files and calls the
-   callback with the marker placed on the heading."
+  callback with the marker placed on the heading."
   (let* ((today (org-today))
          (date (calendar-gregorian-from-absolute today))
          (files (org-agenda-files nil 'ifmode))
@@ -191,7 +203,7 @@
 ;; TODO: do for buffer as well?
 (defun todoist-sync--org-visit-todos-in-file (file callback)
   "Visit all TODO, etc. entries from the current buffer and calls the
-   callback with the marker placed on the heading."
+  callback with the marker placed on the heading."
   (let* ((today (org-today))
          (date (calendar-gregorian-from-absolute today))
          (rtnall nil))
@@ -314,7 +326,7 @@
 ;; ================== Sync Agenda Files ==================
 
 ;; TODO: do this properly
-;; TODO: remove DEADLINE from description
+;; TODO: make sure the description is not too long
 (defun todoist-sync--clean-org-text (text)
   "Remove the PROPERTIES drawer from the org text."
   (let* ((text (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:\n" "" text))
@@ -339,6 +351,10 @@
 (defun todoist-sync--generate-uuid ()
   "Generate a random UUID."
   (replace-regexp-in-string " " "-" (downcase (md5 (format "%s%s%s" (random) (current-time) user-mail-address)))))
+
+(defun todoist-sync--generate-temp_id ()
+  "Generate a random UUID prefixed with tmp_."
+  (concat "tmp_" (todoist-sync--generate-uuid)))
 
 (defun todoist-sync--extract-agenda-project-uuid (projects)
   "Extract the UUID of the agenda project from the list of projects."
@@ -368,10 +384,8 @@
      (funcall callback (todoist-sync--filter-by-project todoist-sync--agenda-uuid items)))
    t))
 
-(defun todoist-sync--visit-org-heading (changed-agenda-items-by-id)
+(defun todoist-sync--visit-org-heading (changed-agenda-items-by-id &optional command-stack)
   (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-synced))
-        ;; BUG: If the parent is currently being pushed there is no ID yet
-        ;; Solve: use uuids and collect all changes then do one request
         (synced-id-parent (todoist-sync--get-first-synced-parent))
         (heading (org-get-heading t t t t))
         (description (todoist-sync--clean-org-text (org-get-entry)))
@@ -392,20 +406,29 @@
           ;; TODO: handle cancled etc better
           (org-entry-delete mark-pos todoist-sync-org-prop-synced))))
     (when (and (not synced-id) (not org-is-done))
-      ;; TODO: [MULTIPLE] collect all items and send them in one request
-      ;; TODO: If the parent is also a todo item add it as the parent-task
-      (todoist-sync-add-item
-       `((content . ,heading)
-         (project_id . ,todoist-sync--agenda-uuid)
-         (description . ,description)
-         (due . ,due)
-         (parent_id . ,synced-id-parent))
-       (lambda (data)
-         ;; Add the id of the new item to the org entry
-         (let* ((temp_id_mapping (car (cdr (assoc 'temp_id_mapping data))))
-                (id (cdr temp_id_mapping)))
-           (org-entry-put mark-pos todoist-sync-org-prop-synced id)
-           (message "Successfully added item %s" id)))))))
+      (let* ((temp_id (todoist-sync--generate-temp_id))
+             (command
+              (todoist-sync--add-item-command
+               temp_id
+               `((content . ,heading)
+                 (project_id . ,todoist-sync--agenda-uuid)
+                 (description . ,description)
+                 (due . ,due)
+                 (parent_id . ,synced-id-parent))))
+             (callback
+              (lambda (data)
+                ;; Add the id of the new item to the org entry
+                (let* ((temp_id_mapping (alist-get 'temp_id_mapping data))
+                       (temp_id_symbol (intern temp_id))
+                       (id (alist-get temp_id_symbol temp_id_mapping)))
+                  (org-entry-put mark-pos todoist-sync-org-prop-synced id)
+                  (message "Successfully added item %s" id)))))
+        (org-entry-put mark-pos todoist-sync-org-prop-synced temp_id)
+        (if command-stack
+            (todoist-sync--add-command command callback command-stack)
+          (todoist-sync--make-request
+           :commands (list command)
+           :callback callback))))))
 
 (defun todoist-sync--do-sync ()
   "Sync the agenda with todoist."
@@ -414,15 +437,19 @@
      (let ((agenda-items-by-id (mapcar (lambda (item) (cons (cdr (assoc 'id item)) item)) items)))
        (todoist-sync--org-visit-todos
         (lambda ()
+          ;; TODO: use multiple-data
           (todoist-sync--visit-org-heading agenda-items-by-id)))))))
 
 (defun todoist-sync-push-buffer ()
   "Push the changes in the current buffer to todoist."
   (interactive)
-  (todoist-sync--org-visit-todos-in-file
-   (buffer-file-name)
-   (lambda ()
-     (todoist-sync--visit-org-heading nil))))
+  (let ((command-stack (todoist-sync--get-empty-command-stack)))
+    (todoist-sync--org-visit-todos-in-file
+     (buffer-file-name)
+     (lambda ()
+       (todoist-sync--visit-org-heading nil command-stack)))
+    (message "Commands: %s" command-stack)
+    (todoist-sync--request-commands command-stack)))
 
 (defun todoist-sync-push-heading ()
   "Push the changes in the current heading to todoist."
