@@ -62,37 +62,47 @@
 
 ;; ================== API ==================
 
+;; Data gathering functions. These simply call the API and pass a
+;; "resources_type". Changes in items of that type since the last
+;; sync are returned.
+
+(cl-defun todoist-sync--make-request (&key sync-token resource-types commands callback)
+  "Make a request to the Todoist API."
+  (let ((sync-token (or sync-token "*"))
+        (resource-types (or resource-types []))
+        (commands (or commands []))
+        (callback (or callback (lambda (_) nil))))
+    (request
+      todoist-sync--api-url
+      :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
+      :params `(("sync_token" . ,sync-token)
+                ("resource_types" . ,(json-encode resource-types))
+                ("commands" . ,(json-encode commands)))
+      :parser 'json-read
+      :success (cl-function
+                (lambda (&key data &allow-other-keys)
+                  (funcall callback data)))
+      :error (cl-function
+              (lambda (&key data &allow-other-keys)
+                (message "Got error: %S" data))))))
+
 (defun todoist-sync-get-projects (callback)
   "Get all projects from the Todoist API. Ignores sync token."
-  (request
-    todoist-sync--api-url
-    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-    :params `(("sync_token" . "*")
-              ("resource_types" . "[\"projects\"]"))
-    :parser 'json-read
-    :success (cl-function
-              (lambda (&key data &allow-other-keys)
-                (funcall callback (cdr (assoc 'projects data)))))
-    :error (cl-function
-            (lambda (&key data &allow-other-keys)
-              (message "Got error: %S" data)))))
+  (todoist-sync--make-request
+   :sync-token "*"
+   :resource-types '(projects)
+   :callback (lambda (data)
+               (message "Got projects: %s" data)
+               (funcall callback (cdr (assoc 'projects data))))))
 
 (defun todoist-sync-get-items (callback &optional update-sync-token)
-  "Get all items changed since the last sync from the Todoist API."
-  (request
-    todoist-sync--api-url
-    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
-    :params `(("sync_token" . ,(todoist-sync--get-sync-token))
-              ("resource_types" . "[\"items\"]"))
-    :parser 'json-read
-    :success (cl-function
-              (lambda (&key data &allow-other-keys)
-                (if update-sync-token
-                    (todoist-sync--update-sync-token data))
-                (funcall callback (cdr (assoc 'items data)))))
-    :error (cl-function
-            (lambda (&key data &allow-other-keys)
-              (message "Got error: %S" data)))))
+  (todoist-sync--make-request
+   :sync-token (todoist-sync--get-sync-token)
+   :resource-types '(items)
+   :callback (lambda (data)
+               (when update-sync-token
+                 (todoist-sync--update-sync-token data))
+               (funcall callback (cdr (assoc 'items data))))))
 
 (defun todoist-sync--filter-by-project (project-id items)
   "Filter the list of items by the project ID."
