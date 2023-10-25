@@ -432,6 +432,34 @@ to indicate a full sync is configured."
            :commands (list command)
            :callback callback))))))
 
+(defun todoist-sync--update-org-heading ()
+  "Updates the heading the point is on."
+  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-synced)))
+    (if synced-id
+        (let* ((org-is-done (org-entry-is-done-p))
+               (heading (org-get-heading t t t t))
+               (description (todoist-sync--clean-org-text (org-get-entry)))
+               (due (todoist-sync--todoist-date-for-at-point))
+               (command
+                (if org-is-done
+                    (todoist-sync--item-complete-command synced-id)
+                  (todoist-sync--item-update-command
+                   `((id . ,synced-id)
+                     (content . ,heading)
+                     (description . ,description)
+                     (due . ,due)))))
+               (callback
+                (if org-is-done
+                    (lambda (_)
+                      (org-entry-delete (point-marker) todoist-sync-org-prop-synced)
+                      (message "Successfully completed item %s" synced-id))
+                  (lambda (_)
+                    (message "Successfully updated item %s" synced-id)))))
+          (todoist-sync--make-request
+           :commands (list command)
+           :callback callback))
+      (message "Todo not synced."))))
+
 (defun todoist-sync-push-buffer ()
   "Push the changes in the current buffer to todoist."
   (interactive)
@@ -456,6 +484,18 @@ to indicate a full sync is configured."
      (save-excursion
        (org-back-to-heading)
        (todoist-sync--visit-org-heading nil)))))
+
+;; TODO: combine this with push heading
+;; Late I want also the push buffer / region functions to update todoist
+;; Same for the automatic agenda updates
+(defun todoist-sync-update-heading ()
+  "Update the current heading in todoist."
+  (interactive)
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (save-excursion
+       (org-back-to-heading)
+       (todoist-sync--update-org-heading)))))
 
 ;; The only public function in the package
 (defun todoist-sync ()
