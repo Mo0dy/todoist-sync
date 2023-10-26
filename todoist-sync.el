@@ -103,6 +103,19 @@ to indicate a full sync is configured."
                  (todoist-sync--update-sync-token data))
                (funcall callback (cdr (assoc 'items data))))))
 
+(defun todoist-sync-get-item (callback item-id)
+  (request
+    todoist-sync--items-api-url
+    :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
+    :data `(("item_id" . ,item-id))
+    :parser 'json-read
+    :success (cl-function
+              (lambda (&key data &allow-other-keys)
+                (funcall callback data)))
+    :error (cl-function
+            (lambda (&key data &allow-other-keys)
+              (message "Got error: %S" data)))))
+
 (defun todoist-sync--filter-by-project (project-id items)
   "Filter the list of items by the project ID."
   (cl-remove-if-not (lambda (item)
