@@ -149,7 +149,8 @@ to indicate a full sync is configured."
     (args . ,args)))
 
 (defun todoist-sync--item-complete-command (id)
-  `((type . "item_complete")
+  ;; Item close should work with recurring tasks
+  `((type . "item_close")
     (uuid . ,(todoist-sync--generate-uuid))
     (args . ((id . ,id)))))
 
