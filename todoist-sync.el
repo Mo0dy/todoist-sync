@@ -402,7 +402,9 @@
 
 (defun todoist-sync--visit-org-heading (marker updated-items command-stack)
   "Syncs the org heading at point. Adds the commands to COMMAND-STACK.
-UPDATED-ITEMS is a list of items that have been updated in todoist since the last sync."
+UPDATED-ITEMS is a list of items that have been updated in todoist
+since the last sync."
+  (message "[todoist-sync-dbg] updated-items: %s" updated-items)
   (save-excursion
     (goto-char marker)
     (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
@@ -412,7 +414,46 @@ UPDATED-ITEMS is a list of items that have been updated in todoist since the las
           (due (todoist-sync--todoist-date-for-at-point)))
       (cond
        (synced-id
-        (message "NOT YET IMPLEMENTED!"))
+        (let* ((todoist-new-sync-token (alist-get 'sync_token updated-items))
+               (todoist-item-updates (cdr (assoc synced-id (alist-get 'items updated-items)))))
+          (cond
+           (todoist-item-updates ;; something in todoist has changed
+            (cond
+             ((alist-get 'completed_at todoist-item-updates)
+              (org-todo 'done)
+              (org-entry-delete marker todoist-sync-org-prop-id)
+              (org-entry-delete marker todoist-sync-org-prop-synctoken))
+             (t ;; the completion status has not changed but at least one other thing has
+              (when org-is-done
+                (todoist-sync--add-command
+                 (todoist-sync--item-complete-command synced-id)
+                 (lambda (_)
+                   (org-entry-delete marker todoist-sync-org-prop-id)
+                   (org-entry-delete marker todoist-sync-org-prop-synctoken)
+                   (message "Successfully completed item %s" synced-id))
+                 command-stack))
+              ;; TODO: sync at least the date
+              (message "todoist-sync: conflict detected for item %s" synced-id))))
+           (t ;; no change in todoist
+            (todoist-sync--add-command
+             (todoist-sync--item-update-command
+              `((id . ,synced-id)
+                (content . ,heading)
+                (description . ,description)
+                (due . ,due)))
+             (lambda (data)
+               (org-entry-put marker todoist-sync-org-prop-synctoken
+                              (alist-get 'sync_token data))
+               (message "Successfully updated item %s" synced-id))
+             command-stack)
+            (when org-is-done
+              (todoist-sync--add-command
+               (todoist-sync--item-complete-command synced-id)
+               (lambda (_)
+                 (org-entry-delete marker todoist-sync-org-prop-id)
+                 (org-entry-delete marker todoist-sync-org-prop-synctoken)
+                 (message "Successfully completed item %s" synced-id))
+               command-stack))))))
        (t ;; not yet synced
         (unless org-is-done
           (let* ((temp_id (todoist-sync--generate-temp_id))
@@ -430,59 +471,15 @@ UPDATED-ITEMS is a list of items that have been updated in todoist since the las
                     ;; Add the id of the new item to the org entry
                     (let* ((temp_id_mapping (alist-get 'temp_id_mapping data))
                            (temp_id_symbol (intern temp_id))
-                           (id (alist-get temp_id_symbol temp_id_mapping)))
+                           (id (alist-get temp_id_symbol temp_id_mapping))
+                           (sync-token (alist-get 'sync_token data)))
                       ;; Here the temp id is replaced with the actual id after the sync
                       (org-entry-put marker todoist-sync-org-prop-id id)
+                      (org-entry-put marker todoist-sync-org-prop-synctoken sync-token)
                       (message "Successfully added item %s" id)))))
             ;; Store temp id so that other items can reference it during this update
             (org-entry-put marker todoist-sync-org-prop-id temp_id)
             (todoist-sync--add-command command callback command-stack))))))))
-
-(defun todoist-sync--visit-org-heading--old (marker updated-items command-stack)
-  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
-        (synced-id-parent (todoist-sync--get-first-synced-parent))
-        (heading (org-get-heading t t t t))
-        (description (todoist-sync--clean-org-text (org-get-entry)))
-        (due (todoist-sync--todoist-date-for-at-point))
-        (org-is-done (org-entry-is-done-p))
-        (mark-pos (point-marker)))
-    (when synced-id
-      ;; If the item is already synced we need to check if it has changed
-      (let* ((todoist-item )
-             (todoist-is-done (cdr (assoc 'completed_at todoist-item))))
-        (when org-is-done
-          (todoist-sync--complete-item
-           synced-id
-           (lambda (_)
-             (org-entry-delete mark-pos todoist-sync-org-prop-id))))
-        (when todoist-is-done
-          (org-todo 'done)
-          ;; TODO: handle cancled etc better
-          (org-entry-delete mark-pos todoist-sync-org-prop-id))))
-    (when (and (not synced-id) (not org-is-done))
-      (let* ((temp_id (todoist-sync--generate-temp_id))
-             (command
-              (todoist-sync--add-item-command
-               temp_id
-               `((content . ,heading)
-                 (project_id . ,todoist-sync--agenda-uuid)
-                 (description . ,description)
-                 (due . ,due)
-                 (parent_id . ,synced-id-parent))))
-             (callback
-              (lambda (data)
-                ;; Add the id of the new item to the org entry
-                (let* ((temp_id_mapping (alist-get 'temp_id_mapping data))
-                       (temp_id_symbol (intern temp_id))
-                       (id (alist-get temp_id_symbol temp_id_mapping)))
-                  (org-entry-put mark-pos todoist-sync-org-prop-id id)
-                  (message "Successfully added item %s" id)))))
-        (org-entry-put mark-pos todoist-sync-org-prop-id temp_id)
-        (if command-stack
-            (todoist-sync--add-command command callback command-stack)
-          (todoist-sync--make-request
-           :commands (list command)
-           :callback callback))))))
 
 (defun todoist-sync--update-org-heading ()
   "Updates the heading the point is on."
@@ -512,9 +509,14 @@ UPDATED-ITEMS is a list of items that have been updated in todoist since the las
            :callback callback))
       (message "Todo not synced."))))
 
+(defun todoist-sync--items-to-items-by-id (items)
+  "Creates alist to lookup items by id."
+  (mapcar (lambda (item) (cons (alist-get 'id item) item)) items))
+
 (defun todoist-sync--multiple-get-items-requests (sync-tokens callback)
   "Get all updates for the given SYNC-TOKENS asynchronously.
-  Calls callback with result alist once all requests are done."
+  Calls CALLBACk with ((<sync_token> . ((sync_token . <new_sync_token) (items . <item>))) alist"
+  (message "[todoist-sync-dbg] multiple get items requests: %s" sync-tokens)
   (let ((result nil)
         (remaining-sync-tokens sync-tokens))
     (unless sync-tokens
@@ -522,10 +524,18 @@ UPDATED-ITEMS is a list of items that have been updated in todoist since the las
     (dolist (sync-token sync-tokens)
       (todoist-sync-get-items
        (lambda (data)
+         (message "[todoist-sync-dbg] multiple get items request for sync-token %s : %s" sync-token data)
          (setq result (append result (list (cons sync-token data))))
          (setq remaining-sync-tokens (remove sync-token remaining-sync-tokens))
          (when (equal remaining-sync-tokens nil)
-           (funcall callback result)))
+           (let ((result-alist
+                  (mapcar
+                   (lambda (sync-result)
+                     (cons (car sync-result) ;; old sync-token
+                           `((sync_token . ,(alist-get 'sync_token sync-result))
+                             (items . ,(todoist-sync--items-to-items-by-id (alist-get 'items sync-result))))))
+                   result)))
+             (funcall callback result-alist))))
        sync-token))))
 
 (defun todoist-sync--visit-org-headings (headings)
@@ -544,7 +554,7 @@ UPDATED-ITEMS is a list of items that have been updated in todoist since the las
                  (sync-token (cdr heading)))
              (todoist-sync--visit-org-heading
               marker
-              (alist-get sync-token updated-items-by-sync-token nil)
+              (cdr (assoc sync-token updated-items-by-sync-token nil))
               command-stack)))
          (todoist-sync--request-commands command-stack))))))
 
@@ -553,7 +563,7 @@ UPDATED-ITEMS is a list of items that have been updated in todoist since the las
   (interactive)
   (todoist-sync--ensure-agenda-uuid
    (lambda ()
-     (message "[todoist-sync-dbg] syncing file %s" (buffer-file-name))
+     (message "[todoist-sync-dbg] syncing file =====================================\n%s\n===========================" (buffer-file-name))
      (let ((headings nil))
        (todoist-sync--org-visit-todos-in-file
         (buffer-file-name)
