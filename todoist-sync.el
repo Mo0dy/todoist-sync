@@ -279,30 +279,31 @@
               result)))
     result))
 
-(defun todoist-sync--write-todo-to-org (todo level)
+(defun todoist-sync--write-todo-to-org (todo sync-token level)
   "Write a single TODO item to the current buffer, indented to LEVEL."
   (let ((data (cdr (assoc 'data todo)))
         (sub-todos (cdr (assoc 'todos todo))))
     (insert (make-string level ?*) " TODO " (alist-get 'content data) "\n")
     (org-entry-put (point) todoist-sync-org-prop-id (alist-get 'id data))
+    (org-entry-put (point) todoist-sync-org-prop-synctoken sync-token)
     (when (alist-get 'due data)
       (org-deadline nil (alist-get 'date (alist-get 'due data))))
     (when (alist-get 'description data)
       (insert (alist-get 'description data) "\n"))
     (dolist (child-todo sub-todos)
-      (todoist-sync--write-todo-to-org child-todo (+ 1 level)))))
+      (todoist-sync--write-todo-to-org child-todo sync-token (+ 1 level)))))
 
-(defun todoist-sync--write-project-to-org (project)
+(defun todoist-sync--write-project-to-org (project sync-token)
   "Write a single PROJECT and its TODOs to the current buffer."
   (let ((data (cdr (assoc 'data project)))
         (todos (cdr (assoc 'todos project))))
     (insert "* " (alist-get 'name data) "\n")
     (dolist (todo todos)
-      (todoist-sync--write-todo-to-org todo 2))))
+      (todoist-sync--write-todo-to-org todo sync-token 2))))
 
-(defun todoist-sync--write-hierarchical-data-to-org-file (hierarchical-data)
+(defun todoist-sync--write-hierarchical-data-to-org-file (hierarchical-data sync-token)
   (dolist (project hierarchical-data)
-    (todoist-sync--write-project-to-org project)))
+    (todoist-sync--write-project-to-org project sync-token)))
 
 (defun todoist-sync--insert-todos-into-file (&optional done-callback)
   "Inserts todos into file."
@@ -314,8 +315,9 @@
      (todoist-sync-get-items
       (lambda (data)
         (let* ((items (alist-get 'items data))
-               (hierarchical-data (todoist-sync--hierarchicalize-projects projects items)))
-          (todoist-sync--write-hierarchical-data-to-org-file hierarchical-data))
+               (hierarchical-data (todoist-sync--hierarchicalize-projects projects items))
+               (sync-token (alist-get 'sync_token data)))
+          (todoist-sync--write-hierarchical-data-to-org-file hierarchical-data sync-token))
         (funcall done-callback))))))
 
 (defun todoist-sync-write-to-file ()
