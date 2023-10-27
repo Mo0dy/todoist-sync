@@ -193,7 +193,7 @@
 ;; ====== Org mode integration ======
 
 ;; TODO: combine these functions
-(defun todoist-sync--org-visit-todos (callback)
+(defun todoist-sync--org-visit-agenda-todos (callback)
   "Visit all TODO, etc. entries from all agenda files and calls the
   callback with the marker placed on the heading."
   (let* ((today (org-today))
@@ -481,41 +481,14 @@ since the last sync."
             (org-entry-put marker todoist-sync-org-prop-id temp_id)
             (todoist-sync--add-command command callback command-stack))))))))
 
-(defun todoist-sync--update-org-heading ()
-  "Updates the heading the point is on."
-  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-id)))
-    (if synced-id
-        (let* ((org-is-done (org-entry-is-done-p))
-               (heading (org-get-heading t t t t))
-               (description (todoist-sync--clean-org-text (org-get-entry)))
-               (due (todoist-sync--todoist-date-for-at-point))
-               (command
-                (if org-is-done
-                    (todoist-sync--item-complete-command synced-id)
-                  (todoist-sync--item-update-command
-                   `((id . ,synced-id)
-                     (content . ,heading)
-                     (description . ,description)
-                     (due . ,due)))))
-               (callback
-                (if org-is-done
-                    (lambda (_)
-                      (org-entry-delete (point-marker) todoist-sync-org-prop-id)
-                      (message "Successfully completed item %s" synced-id))
-                  (lambda (_)
-                    (message "Successfully updated item %s" synced-id)))))
-          (todoist-sync--make-request
-           :commands (list command)
-           :callback callback))
-      (message "Todo not synced."))))
-
 (defun todoist-sync--items-to-items-by-id (items)
   "Creates alist to lookup items by id."
   (mapcar (lambda (item) (cons (alist-get 'id item) item)) items))
 
 (defun todoist-sync--multiple-get-items-requests (sync-tokens callback)
   "Get all updates for the given SYNC-TOKENS asynchronously.
-  Calls CALLBACk with ((<sync_token> . ((sync_token . <new_sync_token) (items . <item>))) alist"
+  Calls CALLBACk with:
+ ((<sync_token> . ((sync_token . <new_sync_token) (items . <item>))) alist"
   (message "[todoist-sync-dbg] multiple get items requests: %s" sync-tokens)
   (let ((result nil)
         (remaining-sync-tokens sync-tokens))
@@ -575,59 +548,34 @@ since the last sync."
        (message "[todoist-sync-dbg] found headings:\n%s" headings)
        (todoist-sync--visit-org-headings headings)))))
 
-;; OLD CODE:
-
-(defun todoist-sync-push-buffer ()
-  "Push the changes in the current buffer to todoist."
+(defun todoist-sync-heading ()
+  "Syncronizes the todo at point with todoist."
   (interactive)
   (todoist-sync--ensure-agenda-uuid
    (lambda ()
-     (let ((command-stack (todoist-sync--get-empty-command-stack)))
-       (todoist-sync--org-visit-todos-in-file
-        (buffer-file-name)
+     (message "[todoist-sync-dbg] syncing heading =====================================\n%s\n===========================" (buffer-file-name))
+     (save-excursion
+       (org-back-to-heading)
+       (let* ((marker (point-marker))
+              (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken))
+              (headings (list (cons marker sync-token))))
+         (todoist-sync--visit-org-headings headings))))))
+
+(defun todoist-sync-agenda ()
+  "Syncronizes the todos in the agenda with todoist."
+  (interactive)
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (message "[todoist-sync-dbg] syncing agenda =====================================\n%s\n===========================" (buffer-file-name))
+     (let ((headings nil))
+       (todoist-sync--org-visit-agenda-todos
         (lambda ()
-          (todoist-sync--visit-org-heading nil command-stack)))
-       (todoist-sync--request-commands command-stack)))))
-
-;; TODO: todoist-sync-pull-buffer
-
-(defun todoist-sync-push-heading ()
-  "Push the the current heading to todoist."
-  (interactive)
-  ;; TODO: provide a recursive variant of this function that pushes parent headings as well
-  ;; TODO: provide a push region function
-  (todoist-sync--ensure-agenda-uuid
-   (lambda ()
-     (save-excursion
-       (org-back-to-heading)
-       (todoist-sync--visit-org-heading nil)))))
-
-;; TODO: combine this with push heading
-;; Late I want also the push buffer / region functions to update todoist
-;; Same for the automatic agenda updates
-(defun todoist-sync-update-heading ()
-  "Update the current heading in todoist."
-  (interactive)
-  (todoist-sync--ensure-agenda-uuid
-   (lambda ()
-     (save-excursion
-       (org-back-to-heading)
-       (todoist-sync--update-org-heading)))))
-
-;; The only public function in the package
-(defun todoist-sync ()
-  "Sync the agenda with todoist."
-  (interactive)
-  (todoist-sync--ensure-agenda-uuid
-   (lambda ()
-     (todoist-sync--get-agenda-udpates
-      (lambda (items)
-        (let ((agenda-items-by-id (mapcar (lambda (item) (cons (cdr (assoc 'id item)) item)) items))
-              (command-stack (todoist-sync--get-empty-command-stack)))
-          (todoist-sync--org-visit-todos
-           (lambda ()
-             (todoist-sync--visit-org-heading agenda-items-by-id command-stack)))
-          (todoist-sync--request-commands command-stack)))))))
+          (let ((marker (point-marker))
+                (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
+            ;; append to end of list
+            (setq headings (append headings (list (cons marker sync-token)))))))
+       (message "[todoist-sync-dbg] found headings:\n%s" headings)
+       (todoist-sync--visit-org-headings headings)))))
 
 (provide 'todoist-sync)
 ;;; todoist-sync.el ends here
