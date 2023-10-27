@@ -20,10 +20,25 @@
 ;;; Code:
 
 
-;; TODO: support for recurring tasks
+;; TODO: support for creating recurring tasks
 ;; TODO: check for conflicts in the deadline and allow user to resolve them
 ;; TODO: write file??? (or ask user if file should be written to)
 ;; TODO: if called interactively ask to save changed files
+;; TODO: give option to remove/refile headlines once completed
+;; TODO: implement quick add to use todoists due date parsing
+
+;; NOTES:
+;; if we set an item_id in the request we should only get info about that item
+;; Then we can also set the all_data flag to false to only get item info and not (ancestors, projects, section and notes)
+
+;; Overview:
+;; Syncing happens according to the following scheme:
+;; 1. Find all org-todos in the current scope and collect their positions and potentially their sync-tokens
+;;   - (agenda files, current buffer, region, single heading)
+;; 2. For every unique sync token get the todoist changes
+;;   - if all todos were synced at the same time there is only one
+;;   - may be none if no todo has been synced previously
+;; 3. Revisit all todos with the changes from todoist possibly updating either org or todoist or declaring a conflict
 
 (require 'json)
 (require 'request)
@@ -34,31 +49,19 @@
   "The Todoist API token.")
 (defvar todoist-sync-agenda-project "agenda"
   "The name of the project to sync with the agenda.")
-(defvar todoist-sync-org-prop-synced "TODOIST_SYNCED")
+;; Is also used as a marker for synced items
+(defvar todoist-sync-org-prop-id "TODOIST_SYNCED")
+(defvar todoist-sync-org-prop-synctoken "TODOIST_SYNC_TOKEN")
 
 (defvar todoist-sync-todoist-org-file nil)
 
-;; TODO: test without incremental sync
-(defvar todoist-sync-incremental-sync t "Whether to use incremental sync or not.")
-(defvar todoist-sync--sync-token "nil" "The sync token for the Todoist API.")
-
 (defvar todoist-sync--api-url "https://api.todoist.com/sync/v9/sync")
+(defvar todoist-sync--items-api-url "https://api.todoist.com/sync/v9/items/get")
 
 ;; This gets cached before the first sync
 (defvar todoist-sync--agenda-uuid nil "The UUID of the agenda project.")
 
 (defvar todoist-sync-fold-open-descriptions nil "Whether to fold open descriptions in the org file. Requires Emacs version > 29.1.")
-
-(defun todoist-sync--get-sync-token ()
-  "Get the sync token for the Todoist API. May return '*'.
-to indicate a full sync is configured."
-  (if todoist-sync-incremental-sync
-      todoist-sync--sync-token
-    "*"))
-
-(defun todoist-sync--update-sync-token (response)
-  "Updates the sync token from a todoist response."
-  (setq todoist-sync--sync-token (cdr (assoc 'sync_token response))))
 
 ;; ================== API ==================
 
@@ -94,14 +97,11 @@ to indicate a full sync is configured."
    :callback (lambda (data)
                (funcall callback (cdr (assoc 'projects data))))))
 
-(defun todoist-sync-get-items (callback &optional update-sync-token)
+(defun todoist-sync-get-items (callback &optional sync-token)
   (todoist-sync--make-request
-   :sync-token (todoist-sync--get-sync-token)
+   :sync-token sync-token
    :resource-types '(items)
-   :callback (lambda (data)
-               (when update-sync-token
-                 (todoist-sync--update-sync-token data))
-               (funcall callback (cdr (assoc 'items data))))))
+   :callback callback))
 
 (defun todoist-sync-get-item (callback item-id)
   (request
@@ -111,7 +111,7 @@ to indicate a full sync is configured."
     :parser 'json-read
     :success (cl-function
               (lambda (&key data &allow-other-keys)
-                (funcall callback data)))
+                (funcall callback (alist-get 'item data))))
     :error (cl-function
             (lambda (&key data &allow-other-keys)
               (message "Got error: %S" data)))))
@@ -235,7 +235,7 @@ to indicate a full sync is configured."
   "Get the first parent heading of the heading at point that has a todoist id."
   (save-excursion
     (when (org-up-heading-safe)
-      (let ((parent-synced-id (org-entry-get (point) todoist-sync-org-prop-synced)))
+      (let ((parent-synced-id (org-entry-get (point) todoist-sync-org-prop-id)))
         (if parent-synced-id
             parent-synced-id
           (todoist-sync--get-first-synced-parent))))))
@@ -284,7 +284,7 @@ to indicate a full sync is configured."
   (let ((data (cdr (assoc 'data todo)))
         (sub-todos (cdr (assoc 'todos todo))))
     (insert (make-string level ?*) " TODO " (alist-get 'content data) "\n")
-    (org-entry-put (point) todoist-sync-org-prop-synced (alist-get 'id data))
+    (org-entry-put (point) todoist-sync-org-prop-id (alist-get 'id data))
     (when (alist-get 'due data)
       (org-deadline nil (alist-get 'date (alist-get 'due data))))
     (when (alist-get 'description data)
@@ -400,8 +400,46 @@ to indicate a full sync is configured."
      (funcall callback (todoist-sync--filter-by-project todoist-sync--agenda-uuid items)))
    t))
 
-(defun todoist-sync--visit-org-heading (changed-agenda-items-by-id &optional command-stack)
-  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-synced))
+(defun todoist-sync--visit-org-heading (marker updated-items command-stack)
+  "Syncs the org heading at point. Adds the commands to COMMAND-STACK.
+UPDATED-ITEMS is a list of items that have been updated in todoist since the last sync."
+  (save-excursion
+    (goto-char marker)
+    (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
+          (org-is-done (org-entry-is-done-p))
+          (heading (org-get-heading t t t t))
+          (description (todoist-sync--clean-org-text (org-get-entry)))
+          (due (todoist-sync--todoist-date-for-at-point)))
+      (cond
+       (synced-id
+        (message "NOT YET IMPLEMENTED!"))
+       (t ;; not yet synced
+        (unless org-is-done
+          (let* ((temp_id (todoist-sync--generate-temp_id))
+                 (synced-id-parent (todoist-sync--get-first-synced-parent))
+                 (command
+                  (todoist-sync--add-item-command
+                   temp_id
+                   `((content . ,heading)
+                     (project_id . ,todoist-sync--agenda-uuid)
+                     (description . ,description)
+                     (due . ,due)
+                     (parent_id . ,synced-id-parent))))
+                 (callback
+                  (lambda (data)
+                    ;; Add the id of the new item to the org entry
+                    (let* ((temp_id_mapping (alist-get 'temp_id_mapping data))
+                           (temp_id_symbol (intern temp_id))
+                           (id (alist-get temp_id_symbol temp_id_mapping)))
+                      ;; Here the temp id is replaced with the actual id after the sync
+                      (org-entry-put marker todoist-sync-org-prop-id id)
+                      (message "Successfully added item %s" id)))))
+            ;; Store temp id so that other items can reference it during this update
+            (org-entry-put marker todoist-sync-org-prop-id temp_id)
+            (todoist-sync--add-command command callback command-stack))))))))
+
+(defun todoist-sync--visit-org-heading--old (marker updated-items command-stack)
+  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
         (synced-id-parent (todoist-sync--get-first-synced-parent))
         (heading (org-get-heading t t t t))
         (description (todoist-sync--clean-org-text (org-get-entry)))
@@ -410,17 +448,17 @@ to indicate a full sync is configured."
         (mark-pos (point-marker)))
     (when synced-id
       ;; If the item is already synced we need to check if it has changed
-      (let* ((todoist-item (cdr (assoc synced-id changed-agenda-items-by-id)))
+      (let* ((todoist-item )
              (todoist-is-done (cdr (assoc 'completed_at todoist-item))))
         (when org-is-done
           (todoist-sync--complete-item
            synced-id
            (lambda (_)
-             (org-entry-delete mark-pos todoist-sync-org-prop-synced))))
+             (org-entry-delete mark-pos todoist-sync-org-prop-id))))
         (when todoist-is-done
           (org-todo 'done)
           ;; TODO: handle cancled etc better
-          (org-entry-delete mark-pos todoist-sync-org-prop-synced))))
+          (org-entry-delete mark-pos todoist-sync-org-prop-id))))
     (when (and (not synced-id) (not org-is-done))
       (let* ((temp_id (todoist-sync--generate-temp_id))
              (command
@@ -437,9 +475,9 @@ to indicate a full sync is configured."
                 (let* ((temp_id_mapping (alist-get 'temp_id_mapping data))
                        (temp_id_symbol (intern temp_id))
                        (id (alist-get temp_id_symbol temp_id_mapping)))
-                  (org-entry-put mark-pos todoist-sync-org-prop-synced id)
+                  (org-entry-put mark-pos todoist-sync-org-prop-id id)
                   (message "Successfully added item %s" id)))))
-        (org-entry-put mark-pos todoist-sync-org-prop-synced temp_id)
+        (org-entry-put mark-pos todoist-sync-org-prop-id temp_id)
         (if command-stack
             (todoist-sync--add-command command callback command-stack)
           (todoist-sync--make-request
@@ -448,7 +486,7 @@ to indicate a full sync is configured."
 
 (defun todoist-sync--update-org-heading ()
   "Updates the heading the point is on."
-  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-synced)))
+  (let ((synced-id (org-entry-get (point) todoist-sync-org-prop-id)))
     (if synced-id
         (let* ((org-is-done (org-entry-is-done-p))
                (heading (org-get-heading t t t t))
@@ -465,7 +503,7 @@ to indicate a full sync is configured."
                (callback
                 (if org-is-done
                     (lambda (_)
-                      (org-entry-delete (point-marker) todoist-sync-org-prop-synced)
+                      (org-entry-delete (point-marker) todoist-sync-org-prop-id)
                       (message "Successfully completed item %s" synced-id))
                   (lambda (_)
                     (message "Successfully updated item %s" synced-id)))))
@@ -473,6 +511,61 @@ to indicate a full sync is configured."
            :commands (list command)
            :callback callback))
       (message "Todo not synced."))))
+
+(defun todoist-sync--multiple-get-items-requests (sync-tokens callback)
+  "Get all updates for the given SYNC-TOKENS asynchronously.
+  Calls callback with result alist once all requests are done."
+  (let ((result nil)
+        (remaining-sync-tokens sync-tokens))
+    (unless sync-tokens
+      (funcall callback nil))
+    (dolist (sync-token sync-tokens)
+      (todoist-sync-get-items
+       (lambda (data)
+         (setq result (append result (list (cons sync-token data))))
+         (setq remaining-sync-tokens (remove sync-token remaining-sync-tokens))
+         (when (equal remaining-sync-tokens nil)
+           (funcall callback result)))
+       sync-token))))
+
+(defun todoist-sync--visit-org-headings (headings)
+  "Visit all org headings in HEADINGS and update them with the TODOIST-UPDATES-BY-SYNC-ID.
+  HEADINGS is a list of tuples (marker . sync-token)."
+  (let* ((unique-sync-tokens
+          (seq-filter #'identity (seq-uniq (mapcar #'cdr headings)))))
+    (message "[todoist-sync-dbg] unique sync tokens: %s" unique-sync-tokens)
+    (todoist-sync--multiple-get-items-requests
+     unique-sync-tokens
+     (lambda (updated-items-by-sync-token)
+       (message "[todoist-sync-dbg] updated items from todoist:\n%s" updated-items-by-sync-token)
+       (let ((command-stack (todoist-sync--get-empty-command-stack)))
+         (dolist (heading headings)
+           (let ((marker (car heading))
+                 (sync-token (cdr heading)))
+             (todoist-sync--visit-org-heading
+              marker
+              (alist-get sync-token updated-items-by-sync-token nil)
+              command-stack)))
+         (todoist-sync--request-commands command-stack))))))
+
+(defun todoist-sync-file ()
+  "Syncronizes the todos in the current file with todoist."
+  (interactive)
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (message "[todoist-sync-dbg] syncing file %s" (buffer-file-name))
+     (let ((headings nil))
+       (todoist-sync--org-visit-todos-in-file
+        (buffer-file-name)
+        (lambda ()
+          (let ((marker (point-marker))
+                (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
+            ;; append to end of list
+            (setq headings (append headings (list (cons marker sync-token)))))))
+       (message "[todoist-sync-dbg] found headings:\n%s" headings)
+       (todoist-sync--visit-org-headings headings)))))
+
+;; OLD CODE:
 
 (defun todoist-sync-push-buffer ()
   "Push the changes in the current buffer to todoist."
