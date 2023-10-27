@@ -311,14 +311,12 @@
   (todoist-sync-get-projects
    ;; HACK to do full sync
    (lambda (projects)
-     (let ((todoist-sync--sync-token "*"))
-       (todoist-sync-get-items
-        (lambda (items)
-          (setq titems items)
-          (setq tproject projects)
-          (let ((hierarchical-data (todoist-sync--hierarchicalize-projects projects items)))
-            (todoist-sync--write-hierarchical-data-to-org-file hierarchical-data))
-          (funcall done-callback)))))))
+     (todoist-sync-get-items
+      (lambda (data)
+        (let* ((items (alist-get 'items data))
+               (hierarchical-data (todoist-sync--hierarchicalize-projects projects items)))
+          (todoist-sync--write-hierarchical-data-to-org-file hierarchical-data))
+        (funcall done-callback))))))
 
 (defun todoist-sync-write-to-file ()
   "Writes todoist-information to org file."
@@ -390,15 +388,6 @@
        (let ((agenda-project-uuid (todoist-sync--extract-agenda-project-uuid projects)))
          (setq todoist-sync--agenda-uuid agenda-project-uuid)
          (funcall callback))))))
-
-;; Gets all updated items from the agenda project
-(defun todoist-sync--get-agenda-udpates (callback)
-  "Get all items from the agenda project.
-  Calls the callback with the changed items as argument."
-  (todoist-sync-get-items
-   (lambda (items)
-     (funcall callback (todoist-sync--filter-by-project todoist-sync--agenda-uuid items)))
-   t))
 
 (defun todoist-sync--visit-org-heading (marker updated-items command-stack)
   "Syncs the org heading at point. Adds the commands to COMMAND-STACK.
