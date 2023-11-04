@@ -428,18 +428,19 @@
       (org-entry-delete marker todoist-sync-org-prop-hash))))
 
 ;; Main function for syncing a single heading
-(defun todoist-sync--visit-org-heading (marker updated-items command-stack)
+(defun todoist-sync--visit-org-heading (marker updated-data command-stack)
   "Syncs the org heading at point. Adds the commands for todoist to COMMAND-STACK.
 UPDATED-ITEMS is a list of items that have been updated in todoist
 since the last sync (with the sync id of the heading)."
   ;; goto buffer
-  (setq test-marker marker)
   (with-current-buffer (marker-buffer marker)
-    (todoist-sync--debug-msg "Visiting heading: %s updated-items: %s" (org-get-heading t t t t) updated-items)
+    (todoist-sync--debug-msg "Visiting heading: %s updated-items: %s" (org-get-heading t t t t) updated-data)
     (save-excursion
       (goto-char marker)
       (let* ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
-             (todoist-changes (cdr (assoc synced-id updated-items)))
+             (todoist-changes (cdr (assoc synced-id
+                                          (alist-get 'items updated-data))))
+             (new-sync-token (alist-get 'sync_token updated-data))
              (todoist-is-done (alist-get 'completed_at todoist-changes))
              (org-is-done (org-entry-is-done-p))
              (heading (org-get-heading t t t t))
@@ -484,6 +485,22 @@ since the last sync (with the sync id of the heading)."
            command-stack))
          ((and synced-id (not conflict) todoist-changes)
           ;; TODO: incorporate changes from todoist
+          (let* ((todoist-heading (alist-get 'content todoist-changes))
+                 (todoist-description (alist-get 'description todoist-changes))
+                 (todoist-due (alist-get 'date (alist-get 'due todoist-changes))))
+            (if todoist-due
+                (org--deadline-or-schedule nil 'deadline todoist-due)
+              ;; removes deadline:
+              (org--deadline-or-schedule `(4) 'deadline nil))
+
+            (org-entry-put marker todoist-sync-org-prop-synctoken
+                           new-sync-token)
+            (let ((heading (org-get-heading t t t t))
+                  (description (todoist-sync--clean-org-text
+                                (substring-no-properties (org-get-entry)))))
+              (org-entry-put marker todoist-sync-org-prop-hash
+                             (todoist-sync--hash-org-element description heading)))
+            )
           (message "TODO: incorporate changes from todoist for heading %s" heading))
          ;; not yet synced and not done
          ((and (not synced-id) (not org-is-done))
@@ -555,11 +572,12 @@ since the last sync (with the sync id of the heading)."
        (todoist-sync--debug-msg "updated items from todoist:\n%s" updated-items-by-sync-token)
        (let ((command-stack (todoist-sync--get-empty-command-stack)))
          (dolist (heading headings)
-           (let ((marker (car heading))
-                 (sync-token (cdr heading)))
+           (let* ((marker (car heading))
+                  (sync-token (cdr heading))
+                  (updated-data (alist-get sync-token updated-items-by-sync-token nil)))
              (todoist-sync--visit-org-heading
               marker
-              (alist-get 'items (cdr (assoc sync-token updated-items-by-sync-token nil)))
+              updated-data
               command-stack)))
          (todoist-sync--request-commands command-stack done-callback))))))
 
