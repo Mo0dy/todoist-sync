@@ -492,16 +492,26 @@ since the last sync (with the sync id of the heading)."
                 (org--deadline-or-schedule nil 'deadline todoist-due)
               ;; removes deadline:
               (org--deadline-or-schedule `(4) 'deadline nil))
-
+            (org-edit-headline todoist-heading)
+            ;; edit description (This works but we need to change the code
+            ;; that pushes the description in the first place to not push the entire subtree
+            ;; (save-excursion
+            ;;   (org-narrow-to-subtree)
+            ;;   (goto-char (point-min))
+            ;;   (re-search-forward "^:END:")
+            ;;   (forward-line)
+            ;;   ;; delete till the next heading starts or buffer ends
+            ;;   (let ((pos (point)))
+            ;;     (delete-region pos (point)))
+            ;;   (insert todoist-description)
+            ;;   (widen))
             (org-entry-put marker todoist-sync-org-prop-synctoken
                            new-sync-token)
             (let ((heading (org-get-heading t t t t))
                   (description (todoist-sync--clean-org-text
                                 (substring-no-properties (org-get-entry)))))
               (org-entry-put marker todoist-sync-org-prop-hash
-                             (todoist-sync--hash-org-element description heading)))
-            )
-          (message "TODO: incorporate changes from todoist for heading %s" heading))
+                             (todoist-sync--hash-org-element description heading)))))
          ;; not yet synced and not done
          ((and (not synced-id) (not org-is-done))
           (let* ((temp_id (todoist-sync--generate-temp_id))
