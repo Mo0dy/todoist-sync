@@ -10,9 +10,9 @@ The main goal is to push any todois in org-agenda-files to todoist and pull thei
 
 - Incremental sync with Todoist API.
 - Handles due dates.
-- Push existing agenda items to todoist
-- Syncrhonizes todo state between orgmode and todoist for items in the agenda project
-- Pull todoist items into a synchronized orgmode file
+- Push org-mode items to todoist
+- Syncrhonizes todo state, due date and heading of todos between todoist and org-mode
+- Pull todoist items into an interactive org-mode file
 
 
 ## Requirements
@@ -41,6 +41,66 @@ Set the following variables before running `todoist-sync`:
 (setq todoist-sync-todoist-org-file "Path to the org file used to display Todoist tasks")
 ```
 
+## Usage
+
+Syn the current orgmode heading:
+
+``` elisp
+M-x todoist-sync-heading
+```
+
+To manually synchronize the current org file with todoist run the following command:
+
+```elisp
+M-x todoist-sync-file
+```
+
+To sync all agenda files:
+
+```elisp
+M-x todoist-sync-agenda
+```
+
+To pull all todos from todoist into the file specified by `todoist-sync-todoist-org-file` run:
+
+```elisp
+M-x todoist-sync-write-to-file
+```
+
+## Quality of Like Helpers
+
+Sync todos when the todo state is updated in org-mode
+
+``` elisp
+(defun my/todoist-sync-push-heading-if-done ()
+    (cond ((derived-mode-p 'org-agenda-mode)
+        (let* ((marker (org-get-at-bol 'org-marker))
+               (buffer (marker-buffer marker)))
+          (with-current-buffer buffer
+            (save-excursion
+            (widen)
+            (goto-char (marker-position marker))
+            (org-fold-show-context 'agenda)
+            (org-back-to-heading)
+            (when (org-entry-is-done-p
+                (todoist-sync-heading)))))))
+          (t (when (org-entry-is-done-p)
+               (todoist-sync-heading)))))
+    
+(after! org
+    (add-hook 'org-after-todo-state-change-hook #'my/todoist-sync-push-heading-if-done))
+```
+
+Open the todoist file in agenda-view
+
+``` elisp
+(defun my/todoist-sync-create-todoist-file-and-open-agenda ()
+  (interactive)
+  (todoist-sync-write-to-file
+     (lambda ()
+        (org-agenda nil "a"))))
+```
+
 Automatically run a sync before agenda view. (Note that this may not complete in time.)
     
 ```elisp
@@ -51,26 +111,6 @@ Run sync every 5 minutes.
 
 ``` elisp
 (run-with-timer 0 300 #'todoist-sync)
-```
-
-## Usage
-
-To manually synchronize the Org agenda with Todoist, run the following command:
-
-```elisp
-M-x todoist-sync
-```
-
-To push all todos in the current file to todoist run:
-
-```elisp
-M-x todoist-sync-push-buffer
-```
-
-To pull all todos from todoist into the file specified by `todoist-sync-todoist-org-file` run:
-
-```elisp
-M-x todoist-sync-write-to-file
 ```
 
 ## Contribution
