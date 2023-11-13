@@ -113,6 +113,31 @@ Run sync every 5 minutes.
 (run-with-timer 0 300 #'todoist-sync)
 ```
 
+To run after capturing a todo define the following function:
+
+``` elisp
+(defun my/todoist-sync-org-todo-buffer ()
+  (interactive)
+  (let ((todo-buffer (find-file-noselect (concat org-directory +org-capture-todo-file))))
+    ;; Save the buffer
+    (with-current-buffer todo-buffer
+      (save-buffer)
+      (todoist-sync-file
+       (lambda ()
+         (save-buffer))))))
+
+```
+
+Then add it as a `after-finalize` hook in your capture templates:
+
+``` elisp
+  (setq org-capture-templates
+       '(("t" "Personal todo" entry
+        (file+headline +org-capture-todo-file "Inbox")
+        "* TODO %?\n%i\n%a" :prepend t :after-finalize
+        my/todoist-sync-org-todo-buffer)))
+```
+
 ## Contribution
 
 Contributions are welcome. If you find any bugs or have suggestions, please open an issue.
