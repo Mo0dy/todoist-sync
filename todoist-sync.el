@@ -594,19 +594,20 @@ since the last sync (with the sync id of the heading)."
 (defun todoist-sync-file (&optional done-callback)
   "Syncronizes the todos in the current file with todoist."
   (interactive)
-  (todoist-sync--ensure-agenda-uuid
-   (lambda ()
-     (todoist-sync--debug-msg "syncing file =====================================\n%s\n===========================" (buffer-file-name))
-     (let ((headings nil))
-       (todoist-sync--org-visit-todos-in-file
-        (buffer-file-name)
-        (lambda ()
-          (let ((marker (point-marker))
-                (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
-            ;; append to end of list
-            (setq headings (append headings (list (cons marker sync-token)))))))
-       (todoist-sync--debug-msg "found headings:\n%s" headings)
-       (todoist-sync--visit-org-headings headings done-callback)))))
+  (let ((buffer (current-buffer)))
+    (todoist-sync--ensure-agenda-uuid
+     (lambda ()
+       (todoist-sync--debug-msg "syncing file =====================================\n%s\n===========================" (buffer-file-name))
+       (let ((headings nil))
+         (todoist-sync--org-visit-todos-in-file
+          (buffer-file-name buffer)
+          (lambda ()
+            (let ((marker (point-marker))
+                  (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
+              ;; append to end of list
+              (setq headings (append headings (list (cons marker sync-token)))))))
+         (todoist-sync--debug-msg "found headings:\n%s" headings)
+         (todoist-sync--visit-org-headings headings done-callback))))))
 
 (defun todoist-sync-heading ()
   "Syncronizes the todo at point with todoist."
