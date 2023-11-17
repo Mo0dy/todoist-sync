@@ -63,6 +63,9 @@
 
 (defvar todoist-sync-fold-open-descriptions nil "Whether to fold open descriptions in the org file. Requires Emacs version > 29.1.")
 
+(defvar todoist-sync-info-buffer "*todoist-sync-info*"
+  "The buffer to display detailed info in.")
+
 (defvar todoist-sync-log-level
   'info
   "The log level for todoist-sync. Can be 'info, 'error, 'debug.")
@@ -82,6 +85,33 @@
             (equal todoist-sync-log-level 'info)
             (equal todoist-sync-log-level 'error))
     (message (concat "[todoist-sync error] " msg) args)))
+
+(defun todoist-sync--info-buffer-mark-new-sync ()
+  "Inserts a separator and timestamp into the info buffer."
+  (with-current-buffer (get-buffer-create todoist-sync-info-buffer)
+    (goto-char (point-max))
+    (insert (format-time-string "%Y-%m-%d %H:%M:%S") " =====================\n")))
+
+(defun todoist-sync--changed-item-info (marker heading message)
+  "Displays a message in the todoist-info-buffer about changes to an item.
+Includes a clickable link to the item.
+Includes a timestamp and the heading of the item."
+  (with-current-buffer (get-buffer-create todoist-sync-info-buffer)
+    (goto-char (point-max))
+    (insert (format-time-string "%Y-%m-%d %H:%M:%S") " ")
+    (insert (format "%-20s" message))
+    (insert-text-button heading
+                        'action (lambda (_)
+                                  (switch-to-buffer (marker-buffer marker))
+                                  (goto-char marker))
+                        'follow-link t)
+    (insert "\n")))
+
+(defun todoist-sync-visit-info-buffer ()
+
+  "Visit the todoist info buffer."
+  (interactive)
+  (switch-to-buffer (get-buffer-create todoist-sync-info-buffer)))
 
 ;; ================== API ==================
 
@@ -452,6 +482,7 @@ since the last sync (with the sync id of the heading)."
              (conflict (and todoist-changes org-has-changes)))
         (todoist-sync--debug-msg "todoist-changes: %s" todoist-changes)
         (when conflict
+          (todoist-sync--changed-item-info marker heading "Conflict")
           (todoist-sync--info-msg "Conflict for item %s" synced-id))
         (cond
          ;; newly done in orgmode
@@ -461,6 +492,7 @@ since the last sync (with the sync id of the heading)."
            (lambda (_)
              (unless conflict
                (todoist-sync--remove-todoist-properties marker))
+             (todoist-sync--changed-item-info marker heading "Completed todoist")
              (todoist-sync--info-msg "Completed item %s in todoist." synced-id))
            command-stack))
          ;; newly done in todoist
@@ -468,6 +500,7 @@ since the last sync (with the sync id of the heading)."
           (org-todo 'done)
           (unless conflict
             (todoist-sync--remove-todoist-properties marker))
+          (todoist-sync--changed-item-info marker heading "Completed in org-mode")
           (todoist-sync--info-msg "Completed item %s in org-mode." synced-id))
          ;; push org changes to todoist
          ((and synced-id (not conflict) org-has-changes)
@@ -481,7 +514,8 @@ since the last sync (with the sync id of the heading)."
              (org-entry-put marker todoist-sync-org-prop-synctoken
                             (alist-get 'sync_token data))
              (org-entry-put marker todoist-sync-org-prop-hash hash)
-             (todoist-sync--info-msg "Successfully updated item %s" synced-id))
+             (todoist-sync--changed-item-info marker heading "Updated todoist")
+             (todoist-sync--info-msg "Successfully updated item %s in todoist." synced-id))
            command-stack))
          ((and synced-id (not conflict) todoist-changes)
           ;; TODO: incorporate changes from todoist
@@ -511,7 +545,10 @@ since the last sync (with the sync id of the heading)."
                   (description (todoist-sync--clean-org-text
                                 (substring-no-properties (org-get-entry)))))
               (org-entry-put marker todoist-sync-org-prop-hash
-                             (todoist-sync--hash-org-element description heading)))))
+                             (todoist-sync--hash-org-element description heading))
+
+              (todoist-sync--changed-item-info marker heading "Changed orgmode")
+              (todoist-sync--info-msg "Changed item %s in orgmode." synced-id))))
          ;; not yet synced and not done
          ((and (not synced-id) (not org-is-done))
           (let* ((temp_id (todoist-sync--generate-temp_id))
@@ -535,7 +572,8 @@ since the last sync (with the sync id of the heading)."
                       (org-entry-put marker todoist-sync-org-prop-id id)
                       (org-entry-put marker todoist-sync-org-prop-synctoken sync-token)
                       (org-entry-put marker todoist-sync-org-prop-hash hash)
-                      (todoist-sync--info-msg "Added item %s" id)))))
+                      (todoist-sync--changed-item-info marker heading "Added")
+                      (todoist-sync--info-msg "Added item %s to todoist" id)))))
             ;; Store temp id so that other items can reference it during this update
             (org-entry-put marker todoist-sync-org-prop-id temp_id)
             (todoist-sync--add-command command callback command-stack))))))))
@@ -598,6 +636,7 @@ since the last sync (with the sync id of the heading)."
     (todoist-sync--ensure-agenda-uuid
      (lambda ()
        (todoist-sync--debug-msg "syncing file =====================================\n%s\n===========================" (buffer-file-name))
+       (todoist-sync--info-buffer-mark-new-sync)
        (let ((headings nil))
          (todoist-sync--org-visit-todos-in-file
           (buffer-file-name buffer)
@@ -615,6 +654,7 @@ since the last sync (with the sync id of the heading)."
   (todoist-sync--ensure-agenda-uuid
    (lambda ()
      (todoist-sync--debug-msg "syncing heading =====================================\n%s\n===========================" (buffer-file-name))
+     (todoist-sync--info-buffer-mark-new-sync)
      (save-excursion
        (org-back-to-heading)
        (let* ((marker (point-marker))
@@ -628,6 +668,7 @@ since the last sync (with the sync id of the heading)."
   (todoist-sync--ensure-agenda-uuid
    (lambda ()
      (todoist-sync--debug-msg "syncing agenda =====================================\n%s\n===========================" (buffer-file-name))
+     (todoist-sync--info-buffer-mark-new-sync)
      (let ((headings nil))
        (todoist-sync--org-visit-agenda-todos
         (lambda ()
