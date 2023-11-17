@@ -342,7 +342,11 @@ Includes a timestamp and the heading of the item."
     (when (alist-get 'description data)
       (insert (alist-get 'description data) "\n"))
     (dolist (child-todo sub-todos)
-      (todoist-sync--write-todo-to-org child-todo sync-token (+ 1 level)))))
+      (todoist-sync--write-todo-to-org child-todo sync-token (+ 1 level)))
+    (let* ((heading (org-get-heading t t t t))
+           (body (substring-no-properties (org-get-entry)))
+           (hash (todoist-sync--hash-org-element body heading)))
+      (org-entry-put (point) todoist-sync-org-prop-hash hash))))
 
 (defun todoist-sync--write-project-to-org (project sync-token)
   "Write a single PROJECT and its TODOs to the current buffer."
@@ -520,7 +524,7 @@ since the last sync (with the sync id of the heading)."
          ((and synced-id (not conflict) todoist-changes)
           ;; TODO: incorporate changes from todoist
           (let* ((todoist-heading (alist-get 'content todoist-changes))
-                 (todoist-description (alist-get 'description todoist-changes))
+                 ;; (todoist-description (alist-get 'description todoist-changes))
                  (todoist-due (alist-get 'date (alist-get 'due todoist-changes))))
             (if todoist-due
                 (org--deadline-or-schedule nil 'deadline todoist-due)
@@ -542,10 +546,9 @@ since the last sync (with the sync id of the heading)."
             (org-entry-put marker todoist-sync-org-prop-synctoken
                            new-sync-token)
             (let ((heading (org-get-heading t t t t))
-                  (description (todoist-sync--clean-org-text
-                                (substring-no-properties (org-get-entry)))))
+                  (body (substring-no-properties (org-get-entry))))
               (org-entry-put marker todoist-sync-org-prop-hash
-                             (todoist-sync--hash-org-element description heading))
+                             (todoist-sync--hash-org-element body heading))
 
               (todoist-sync--changed-item-info marker heading "Changed orgmode")
               (todoist-sync--info-msg "Changed item %s in orgmode." synced-id))))
