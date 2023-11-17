@@ -70,6 +70,10 @@
   'info
   "The log level for todoist-sync. Can be 'info, 'error, 'debug.")
 
+(defvar todoist-sync-merge-strategy 'report
+  "The strategy to use when merging changes from todoist and org.
+Can be 'report, 'org, 'todoist.")
+
 (defun todoist-sync--debug-msg (msg &rest args)
   (when (equal todoist-sync-log-level 'debug)
     ;; (message "[todoist-sync-dbg] %s" msg)
@@ -462,7 +466,7 @@ Includes a timestamp and the heading of the item."
       (org-entry-delete marker todoist-sync-org-prop-hash))))
 
 ;; Main function for syncing a single heading
-(defun todoist-sync--visit-org-heading (marker updated-data command-stack)
+(defun todoist-sync--visit-org-heading (marker updated-data command-stack &optional merge-strategy)
   "Syncs the org heading at point. Adds the commands for todoist to COMMAND-STACK.
 UPDATED-ITEMS is a list of items that have been updated in todoist
 since the last sync (with the sync id of the heading)."
@@ -483,7 +487,22 @@ since the last sync (with the sync id of the heading)."
              (hash (todoist-sync--hash-org-element body heading))
              (org-has-changes (not (string= hash (org-entry-get (point) todoist-sync-org-prop-hash))))
              (due (todoist-sync--todoist-date-for-at-point))
-             (conflict (and todoist-changes org-has-changes)))
+             (merge-strategy (or merge-strategy todoist-sync-merge-strategy))
+             (conflict (and todoist-changes org-has-changes))
+             ;; If there is a conflict and the merge strategy is not report
+             ;; we redefine the has-changes variables to pretend there is no
+             ;; conflict according to merge-strategy
+             (org-has-changes (if (and conflict (equal merge-strategy 'todoist))
+                                  nil
+                                org-has-changes))
+             (todoist-changes (if (and conflict (equal merge-strategy 'org))
+                                  nil
+                                todoist-changes))
+             (conflict (and conflict (equal merge-strategy 'report))))
+        (unless (or (equal merge-strategy 'report)
+                    (equal merge-strategy 'org)
+                    (equal merge-strategy 'todoist))
+          (error "Invalid merge strategy: %s" merge-strategy))
         (todoist-sync--debug-msg "todoist-changes: %s" todoist-changes)
         (when conflict
           (todoist-sync--changed-item-info marker heading "Conflict")
@@ -611,7 +630,7 @@ since the last sync (with the sync id of the heading)."
              (funcall callback result-alist))))
        sync-token))))
 
-(defun todoist-sync--visit-org-headings (headings &optional done-callback)
+(cl-defun todoist-sync--visit-org-headings (headings &key done-callback merge-strategy)
   "Visit all org headings in HEADINGS and update them with the TODOIST-UPDATES-BY-SYNC-ID.
   HEADINGS is a list of tuples (marker . sync-token)."
   (let* ((unique-sync-tokens
@@ -629,7 +648,8 @@ since the last sync (with the sync id of the heading)."
              (todoist-sync--visit-org-heading
               marker
               updated-data
-              command-stack)))
+              command-stack
+              merge-strategy)))
          (todoist-sync--request-commands command-stack done-callback))))))
 
 (defun todoist-sync-file (&optional done-callback)
@@ -649,10 +669,11 @@ since the last sync (with the sync id of the heading)."
               ;; append to end of list
               (setq headings (append headings (list (cons marker sync-token)))))))
          (todoist-sync--debug-msg "found headings:\n%s" headings)
-         (todoist-sync--visit-org-headings headings done-callback))))))
+         (todoist-sync--visit-org-headings headings :done-callback done-callback))))))
 
-(defun todoist-sync-heading ()
-  "Syncronizes the todo at point with todoist."
+(defun todoist-sync-heading (&optional merge-strategy)
+  "Syncronizes the todo at point with todoist.
+If MERGE-STRATEGY is supplied it overrides the default merge strategy."
   (interactive)
   (todoist-sync--ensure-agenda-uuid
    (lambda ()
@@ -663,7 +684,7 @@ since the last sync (with the sync id of the heading)."
        (let* ((marker (point-marker))
               (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken))
               (headings (list (cons marker sync-token))))
-         (todoist-sync--visit-org-headings headings))))))
+         (todoist-sync--visit-org-headings headings :merge-strategy merge-strategy))))))
 
 (defun todoist-sync-agenda ()
   "Syncronizes the todos in the agenda with todoist."
