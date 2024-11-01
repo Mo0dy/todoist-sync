@@ -378,13 +378,13 @@
 ;; TODO: do this properly
 ;; TODO: make sure the description is not too long
 (defun todoist-sync--clean-org-text (text)
-  "Remove the PROPERTIES drawer from the org text."
+  "Remove the PROPERTIES drawer and deadline from the org text."
   (let* ((text (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:" "" text))
          (text (replace-regexp-in-string "DEADLINE:.*" "" text)))
     text))
 
 (defun todoist-sync--hash-org-element (body-text heading-text)
-  "Hashsed everything in the heading but the properties. Importabtly uses the deadline in the hash as well"
+  "Hashsed everything in the heading but the properties. Importantly uses the deadline in the hash as well"
   (let ((text-no-props (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:" "" body-text)))
     (md5 (concat text-no-props heading-text))))
 
@@ -459,10 +459,18 @@ since the last sync (with the sync id of the heading)."
              (body (substring-no-properties (org-get-entry)))
              (description (todoist-sync--clean-org-text body))
              (hash (todoist-sync--hash-org-element body heading))
-             (org-has-changes (not (string= hash (org-entry-get (point) todoist-sync-org-prop-hash))))
+             (hash-old (org-entry-get (point) todoist-sync-org-prop-hash))
+             (org-has-changes (not (string= hash hash-old)))
              (due (todoist-sync--todoist-date-for-at-point))
              (conflict (and todoist-changes org-has-changes)))
-        (todoist-sync--debug-msg "todoist-changes: %s" todoist-changes)
+        ;; if hash is nil but we have sync ID this should not happen
+        (when (and synced-id (not hash-old))
+          (todoist-sync--error-msg "Hash is nil but we have a sync ID for item %s" synced-id))
+
+        (when todoist-changes
+          (todoist-sync--debug-msg "todoist-changes: %s" todoist-changes))
+        (when org-has-changes
+          (todoist-sync--debug-msg "org-has-changes: %s" org-has-changes))
         (when conflict
           (todoist-sync--info-msg "Conflict for item %s" synced-id))
         (cond
