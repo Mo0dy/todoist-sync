@@ -260,9 +260,10 @@
       (setq org-not-done-regexp old-regexp))
     (dolist (entry rtnall)
       (let ((marker (get-text-property 0 'org-hd-marker entry)))
-        (with-current-buffer (marker-buffer marker)
-          (goto-char marker)
-          (funcall callback))))))
+        (save-excursion
+          (with-current-buffer (marker-buffer marker)
+            (goto-char marker)
+            (funcall callback)))))))
 
 (defun todoist-sync--get-first-synced-parent ()
   "Get the first parent heading of the heading at point that has a todoist id."
