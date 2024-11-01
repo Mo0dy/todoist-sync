@@ -446,9 +446,9 @@ UPDATED-ITEMS is a list of items that have been updated in todoist
 since the last sync (with the sync id of the heading)."
   ;; goto buffer
   (with-current-buffer (marker-buffer marker)
-    (todoist-sync--debug-msg "Visiting heading: %s updated-items: %s" (org-get-heading t t t t) updated-data)
     (save-excursion
       (goto-char marker)
+      (todoist-sync--debug-msg "Visiting heading: %s updated-items: %s" (org-get-heading t t t t) updated-data)
       (let* ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
              (todoist-changes (cdr (assoc synced-id
                                           (alist-get 'items updated-data))))
