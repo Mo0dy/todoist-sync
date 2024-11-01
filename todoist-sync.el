@@ -67,21 +67,33 @@
   'info
   "The log level for todoist-sync. Can be 'info, 'error, 'debug.")
 
+(defvar todoist-sync-log-buffer
+  "*todoist-sync-log*"
+  "The buffer to log todoist-sync debug messages to.")
+
 (defun todoist-sync--debug-msg (msg &rest args)
   (when (equal todoist-sync-log-level 'debug)
     ;; (message "[todoist-sync-dbg] %s" msg)
-    (apply 'message (concat "[todoist-sync-dbg] " msg) args)))
+    (with-current-buffer (get-buffer-create todoist-sync-log-buffer)
+      (goto-char (point-max))
+      (insert (concat "[todoist-sync-dbg] " (apply 'format msg args) "\n")))))
 
 (defun todoist-sync--info-msg (msg &rest args)
   (when (or (equal todoist-sync-log-level 'debug)
             (equal todoist-sync-log-level 'info))
-    (message msg args)))
+    (message msg args)
+    (with-current-buffer (get-buffer-create todoist-sync-log-buffer)
+      (goto-char (point-max))
+      (insert (concat "[todoist-sync-info] " (apply 'format msg args) "\n")))))
 
 (defun todoist-sync--error-msg (msg &rest args)
   (when (or (equal todoist-sync-log-level 'debug)
             (equal todoist-sync-log-level 'info)
             (equal todoist-sync-log-level 'error))
-    (message (concat "[todoist-sync error] " msg) args)))
+    (message (concat "[todoist-sync error] " msg) args)
+    (with-current-buffer (get-buffer-create todoist-sync-log-buffer)
+      (goto-char (point-max))
+      (insert (concat "[todoist-sync-error] " (apply 'format msg args) "\n")))))
 
 ;; ================== API ==================
 
