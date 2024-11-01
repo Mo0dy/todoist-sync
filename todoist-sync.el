@@ -119,7 +119,7 @@
                   (funcall callback data)))
       :error (cl-function
               (lambda (&key data &allow-other-keys)
-                (todoist-sync--error-msg "%S" data))))))
+                (todoist-sync--error-msg "RequestError:\n%S" data))))))
 (lambda (&key data &allow-other-keys))
 (defun todoist-sync-get-projects (callback)
   "Get all projects from the Todoist API. Ignores sync token."
@@ -146,7 +146,7 @@
                 (funcall callback (alist-get 'item data))))
     :error (cl-function
             (lambda (&key data &allow-other-keys)
-              (todoist-sync--error-msg "%S" data)))))
+              (todoist-sync--error-msg "RequestError:\n%S" data)))))
 
 (defun todoist-sync--filter-by-project (project-id items)
   "Filter the list of items by the project ID."
