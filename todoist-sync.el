@@ -90,7 +90,7 @@
   (when (or (equal todoist-sync-log-level 'debug)
             (equal todoist-sync-log-level 'info)
             (equal todoist-sync-log-level 'error))
-    (message (concat "[todoist-sync error] " msg) args)
+    ;; (message (concat "[todoist-sync error] " msg) args)
     (with-current-buffer (get-buffer-create todoist-sync-log-buffer)
       (goto-char (point-max))
       (insert (concat "[todoist-sync-error] " (apply 'format msg args) "\n")))))
@@ -624,8 +624,6 @@ since the last sync (with the sync id of the heading)."
            (let* ((marker (car heading))
                   (sync-token (cdr heading))
                   (updated-data (assoc sync-token updated-items-by-sync-token nil)))
-             (unless updated-data
-               (todoist-sync--error-msg "No updated data for sync token %s"))
              (todoist-sync--visit-org-heading
               marker
               updated-data
