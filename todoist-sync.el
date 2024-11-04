@@ -325,7 +325,7 @@
     (when (alist-get 'description data)
       (insert (alist-get 'description data) "\n"))
     (let* ((heading (org-get-heading t t t t))
-           (body (substring-no-properties (org-get-entry)))
+           (body (substring-no-properties (todoist-sync--get-body-without-subtree)))
            (hash (todoist-sync--hash-org-element body heading)))
       (org-entry-put (point) todoist-sync-org-prop-hash hash))
     (dolist (child-todo sub-todos)
@@ -380,12 +380,27 @@
 
 ;; ================== Sync Org Files ==================
 
+(defun todoist-sync--get-body-without-subtree ()
+  "Get the content between the current heading and the next heading, excluding the heading itself and subheadings."
+  (save-excursion
+    (org-back-to-heading t)
+    (forward-line 1)
+    (let ((start (point))
+          (end (progn
+                 (outline-next-heading)
+                 (point))))
+      (buffer-substring-no-properties start end))))
+
 ;; TODO: do this properly
 ;; TODO: make sure the description is not too long
 (defun todoist-sync--clean-org-text (text)
-  "Remove the PROPERTIES drawer and deadline from the org text."
+  "Remove the PROPERTIES drawer and deadline from the org text.
+
+DO NOT USE FOR HASH GENERATION! (Since the deadline is removed)"
   (let* ((text (replace-regexp-in-string ":PROPERTIES:\\(.*\n\\)*?:END:" "" text))
-         (text (replace-regexp-in-string "DEADLINE:.*" "" text)))
+         (text (replace-regexp-in-string "DEADLINE:.*" "" text))
+         (text (replace-regexp-in-string "\\`[ \t\n]*" "" text))
+         (text (replace-regexp-in-string "[ \t\n]*\\'" "" text)))
     text))
 
 (defun todoist-sync--hash-org-element (body-text heading-text)
@@ -453,7 +468,7 @@ since the last sync (with the sync id of the heading)."
   (with-current-buffer (marker-buffer marker)
     (save-excursion
       (goto-char marker)
-      (todoist-sync--debug-msg "Visiting heading: %s updated-items: %s" (org-get-heading t t t t) updated-data)
+      (todoist-sync--debug-msg "Visiting heading: %s" (org-get-heading t t t t))
       (let* ((synced-id (org-entry-get (point) todoist-sync-org-prop-id))
              (todoist-changes (cdr (assoc synced-id
                                           (alist-get 'items updated-data))))
@@ -461,7 +476,7 @@ since the last sync (with the sync id of the heading)."
              (todoist-is-done (alist-get 'completed_at todoist-changes))
              (org-is-done (org-entry-is-done-p))
              (heading (org-get-heading t t t t))
-             (body (substring-no-properties (org-get-entry)))
+             (body (substring-no-properties (todoist-sync--get-body-without-subtree)))
              (description (todoist-sync--clean-org-text body))
              (hash (todoist-sync--hash-org-element body heading))
              (hash-old (org-entry-get (point) todoist-sync-org-prop-hash))
@@ -534,7 +549,7 @@ since the last sync (with the sync id of the heading)."
                            new-sync-token)
             (let ((heading (org-get-heading t t t t))
                   (description (todoist-sync--clean-org-text
-                                (substring-no-properties (org-get-entry)))))
+                                (substring-no-properties (todoist-sync--get-body-without-subtree)))))
               (org-entry-put marker todoist-sync-org-prop-hash
                              (todoist-sync--hash-org-element description heading)))))
          ;; not yet synced and not done
@@ -572,7 +587,7 @@ since the last sync (with the sync id of the heading)."
 (defun todoist-sync--multiple-get-items-requests (sync-tokens callback)
   "Get all updates for the given SYNC-TOKENS asynchronously.
   Calls CALLBACk with:
- ((<sync_token> . ((sync_token . <new_sync_token) (items . <item>))) alist"
+ ((<sync_token> . ((sync_token . <new_sync_token>) (items . <item>))) alist"
   (todoist-sync--debug-msg "multiple get items requests: %s" sync-tokens)
   (let ((result nil)
         (remaining-sync-tokens sync-tokens))
