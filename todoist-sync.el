@@ -601,18 +601,12 @@ since the last sync (with the sync id of the heading)."
     (dolist (sync-token sync-tokens)
       (todoist-sync-get-items
        (lambda (data)
-         (todoist-sync--debug-msg "multiple get items request for sync-token %s : %s" sync-token data)
-         (setq result (append result (list (cons sync-token data))))
+         (let ((new-sync-token (alist-get 'sync_token data))
+               (items (todoist-sync--items-to-items-by-id (alist-get 'items data))))
+           (push (cons sync-token `((sync_token . ,new-sync-token) (items . ,items))) result))
          (setq remaining-sync-tokens (remove sync-token remaining-sync-tokens))
-         (when (equal remaining-sync-tokens nil)
-           (let ((result-alist
-                  (mapcar
-                   (lambda (sync-result)
-                     (cons (car sync-result) ;; old sync-token
-                           `((sync_token . ,(alist-get 'sync_token sync-result))
-                             (items . ,(todoist-sync--items-to-items-by-id (alist-get 'items sync-result))))))
-                   result)))
-             (funcall callback result-alist))))
+         (when (eq remaining-sync-tokens nil)
+           (funcall callback result)))
        sync-token))))
 
 (defun todoist-sync--visit-org-headings (headings &optional done-callback)
@@ -629,7 +623,9 @@ since the last sync (with the sync id of the heading)."
          (dolist (heading headings)
            (let* ((marker (car heading))
                   (sync-token (cdr heading))
-                  (updated-data (alist-get sync-token updated-items-by-sync-token nil)))
+                  (updated-data (assoc sync-token updated-items-by-sync-token nil)))
+             (unless updated-data
+               (todoist-sync--error-msg "No updated data for sync token %s"))
              (todoist-sync--visit-org-heading
               marker
               updated-data
