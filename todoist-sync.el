@@ -496,6 +496,7 @@ since the last sync (with the sync id of the heading)."
         (cond
          ;; newly done in orgmode
          ((and synced-id org-is-done (not todoist-is-done))
+          (todoist-sync--debug-msg "Completing item %s in todoist." synced-id)
           (todoist-sync--add-command
            (todoist-sync--item-complete-command synced-id)
            (lambda (_)
@@ -505,12 +506,14 @@ since the last sync (with the sync id of the heading)."
            command-stack))
          ;; newly done in todoist
          ((and synced-id todoist-is-done (not org-is-done))
+          (todoist-sync--debug-msg "Completing item %s in org-mode." synced-id)
           (org-todo 'done)
           (unless conflict
             (todoist-sync--remove-todoist-properties marker))
           (todoist-sync--info-msg "Completed item %s in org-mode." synced-id))
          ;; push org changes to todoist
          ((and synced-id (not conflict) org-has-changes)
+          (todoist-sync--debug-msg "Updating item %s in todoist." synced-id)
           (todoist-sync--add-command
            (todoist-sync--item-update-command
             `((id . ,synced-id)
@@ -524,6 +527,7 @@ since the last sync (with the sync id of the heading)."
              (todoist-sync--info-msg "Successfully updated item %s" synced-id))
            command-stack))
          ((and synced-id (not conflict) todoist-changes)
+          (todoist-sync--debug-msg "Updating item %s in org-mode." synced-id)
           ;; TODO: incorporate changes from todoist
           (let* ((todoist-heading (alist-get 'content todoist-changes))
                  (todoist-description (alist-get 'description todoist-changes))
@@ -554,6 +558,7 @@ since the last sync (with the sync id of the heading)."
                              (todoist-sync--hash-org-element description heading)))))
          ;; not yet synced and not done
          ((and (not synced-id) (not org-is-done))
+          (todoist-sync--debug-msg "Adding item %s to todoist." heading)
           (let* ((temp_id (todoist-sync--generate-temp_id))
                  (synced-id-parent (todoist-sync--get-first-synced-parent))
                  (command
