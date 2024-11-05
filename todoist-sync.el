@@ -265,6 +265,19 @@
             (goto-char marker)
             (funcall callback)))))))
 
+(defun todoist-sync--org-visit-todos-in-buffer
+    (buffer callback &optional start end)
+  "Visit all TODO, etc. entries from the current buffer and calls the CALLBACK.
+
+If START and END are given, only visit the region between START and END. "
+  (save-excursion
+    (with-current-buffer buffer
+      (let ((case-fold-search nil))
+        (goto-char (or start (point-min)))
+        (while (re-search-forward org-todo-line-regexp (or end (point-max)) t)
+          (when (match-string 2)
+            (funcall callback)))))))
+
 (defun todoist-sync--get-first-synced-parent ()
   "Get the first parent heading of the heading at point that has a todoist id."
   (save-excursion
@@ -660,6 +673,61 @@ since the last sync (with the sync id of the heading)."
               (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken))
               (headings (list (cons marker sync-token))))
          (todoist-sync--visit-org-headings headings))))))
+
+(defun todoist-sync-region ()
+  "Syncronizes the region with todoist."
+  (interactive)
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (todoist-sync--debug-msg "syncing region =====================================\n%s\n===========================" (buffer-file-name))
+     (let ((headings nil))
+       (todoist-sync--org-visit-todos-in-buffer
+        (current-buffer)
+        (lambda ()
+          (let ((marker (point-marker))
+                (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
+            ;; append to end of list
+            (setq headings (append headings (list (cons marker sync-token)))))))
+       (todoist-sync--debug-msg "found headings:\n%s" headings)
+       (todoist-sync--visit-org-headings headings)))))
+
+(defun todoist-sync-buffer ()
+  "Syncronizes the buffer with todoist."
+  (interactive)
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (todoist-sync--debug-msg "syncing buffer =====================================\n%s\n===========================" (buffer-file-name))
+     (let ((headings nil))
+       (todoist-sync--org-visit-todos-in-buffer
+        (current-buffer)
+        (lambda ()
+          (let ((marker (point-marker))
+                (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
+            ;; append to end of list
+            (setq headings (append headings (list (cons marker sync-token)))))))
+       (todoist-sync--debug-msg "found headings:\n%s" headings)
+       (todoist-sync--visit-org-headings headings)))))
+
+(defun todoist-sync-subtree ()
+  "Syncronizes the subtree at point with todoist."
+  (interactive)
+  (todoist-sync--ensure-agenda-uuid
+   (lambda ()
+     (todoist-sync--debug-msg "syncing subtree =====================================\n%s\n===========================" (buffer-file-name))
+     (let ((headings nil))
+       (save-excursion
+         (org-back-to-heading)
+         (org-narrow-to-subtree)
+         (todoist-sync--org-visit-todos-in-buffer
+          (current-buffer)
+          (lambda ()
+            (let ((marker (point-marker))
+                  (sync-token (org-entry-get (point) todoist-sync-org-prop-synctoken)))
+              ;; append to end of list
+              (setq headings (append headings (list (cons marker sync-token)))))))
+         (widen))
+       (todoist-sync--debug-msg "found headings:\n%s" headings)
+       (todoist-sync--visit-org-headings headings)))))
 
 (defun todoist-sync-agenda ()
   "Syncronizes the todos in the agenda with todoist."
