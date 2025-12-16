@@ -107,6 +107,9 @@
         (resource-types (or resource-types []))
         (commands (or commands []))
         (callback (or callback (lambda (_) nil))))
+    (todoist-sync--debug-msg "Request:\n%S\nData:\n%S\nCommands:\n%S\n" sync-token resource-types commands)
+    (todoist-sync--debug-msg "Callback: %S" callback)
+    
     (request
       todoist-sync--api-url
       :headers `(("Authorization" . ,(concat "Bearer " todoist-sync-token)))
